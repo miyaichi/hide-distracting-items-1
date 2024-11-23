@@ -1,16 +1,16 @@
 # Development Progress
 
-✅ 実装済み ⚠️ 部分的に実装 ❌ 未実装
+✅ Already implemented ⚠️ 部分的に実装 ❌ 未実装
 
 # 基本機能 (Features)
 
-* ✅ Element Selection Mode: クリックで要素を非表示
+* ✅ Element Selection Mode: Click to hide the element.
 * ❌ DOM Navigation: DOM階層での要素選択と表示
-* ✅ Side Panel Interface: 使いやすいコントロールと設定
-* ✅ Domain-based Settings: ドメインごとの設定保存
-* ✅ Automatic Application: 再訪時に設定を自動適用
-* ✅ Visual Element Highlighting: 非表示前のプレビュー
-* ✅ Real-time Updates: 選択時の即時フィードバック
+* ✅ Side Panel Interface: Easy-to-use controls and settings.
+* ✅ Domain-based Settings: ドSave settings by domain.
+* ✅ Automatic Application: Settings will be automatically applied on subsequent visits.
+* ✅ Visual Element Highlighting: Preview before hiding.
+* ✅ Real-time Updates: Immediate feedback when making a selection.
 * ❌ DOM Tree View: ページ要素の階層的なナビゲーション
 
 # 技術スタック (Technology Stack)
@@ -24,10 +24,10 @@
 
 ## Element Selection
 
-* ✅ サイドパネルを開くための拡張機能アイコン
-* ✅ 選択モードの切り替え
-* ✅ ホバー時のハイライト
-* ✅ クリックで要素を非表示
+* ✅ Icon for the extension function to open the side panel.
+* ✅ Switching between selection modes.
+* ✅ Highlight when hovering.
+* ✅ Click to hide element.
 
 ## DOM Navigation
 
@@ -38,9 +38,9 @@
 
 ## Settings Management
 
-* ✅ ドメインごとの非表示要素の表示と管理
-* ✅ 個別要素の削除
-* ✅ ドメインごとの全要素クリア
+* ✅ Display and management of hidden elements by domain.
+* ✅ Deleting individual elements.
+* ✅ Clear all elements for each domain.
 * ❌ 設定のエクスポート/インポート
 
 # Future Enhancements（未実装の機能）
