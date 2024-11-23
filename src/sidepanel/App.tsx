@@ -13,7 +13,7 @@ interface MessagePayload {
   };
 }
 
-const App: React.FC = () => {
+export const App: React.FC = () => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [hiddenElements, setHiddenElements] = useState<ElementIdentifier[]>([]);
   const [currentDomain, setCurrentDomain] = useState<string>('');
