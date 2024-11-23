@@ -1,0 +1,35 @@
+{
+  "name": "hide-distracting-items-3",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "webpack --config webpack.config.js",
+    "watch": "webpack --config webpack.config.js --watch",
+    "dev": "NODE_ENV=development npm run watch",
+    "prod": "NODE_ENV=production npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@types/chrome": "^0.0.283",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.2"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "copy-webpack-plugin": "^12.0.2",
+    "css-loader": "^7.1.2",
+    "postcss": "^8.4.49",
+    "postcss-loader": "^8.1.1",
+    "style-loader": "^4.0.0",
+    "tailwind-scrollbar": "^3.1.0",
+    "tailwindcss": "^3.4.15",
+    "ts-loader": "^9.5.1",
+    "webpack-cli": "^5.1.4"
+  }
+}

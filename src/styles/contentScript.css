@@ -1,0 +1,32 @@
+.hde-overlay {
+  @apply fixed inset-0 pointer-events-none z-[9999];
+}
+
+.hde-tooltip {
+  @apply absolute px-2 py-1 bg-black text-white text-xs rounded
+         transform -translate-y-full -translate-x-1/2
+         pointer-events-none z-[10000];
+}
+
+.hde-tooltip::after {
+  content: '';
+  @apply absolute left-1/2 top-full
+         -translate-x-1/2 border-4
+         border-transparent border-t-black;
+}
+
+/* Animation for newly hidden elements */
+.hde-fade-out {
+  animation: fadeOut 0.3s ease-out forwards;
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
