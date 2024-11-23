@@ -4,24 +4,63 @@ import { ConnectionManager } from '../utils/connectionManager';
 import { ElementFinder } from '../utils/elementFinder';
 import { StorageManager } from '../utils/storageManager';
 
+interface MessagePayload {
+  type: string;
+  enabled?: boolean;
+  identifier?: ElementIdentifier;
+}
+
+interface StyleDefinitions {
+  [key: string]: string;
+}
+
 class ContentScript {
-  private connection: ConnectionManager;
+  private readonly connection: ConnectionManager;
+  private readonly currentDomain: string;
   private isSelectionMode = false;
   private hoveredElement: Element | null = null;
-  private currentDomain: string;
+
+  // スタイル定義
+  private static readonly STYLES: StyleDefinitions = {
+    selectionMode: `
+      .hde-selection-mode,
+      .hde-selection-mode *,
+      html.hde-selection-mode,
+      html.hde-selection-mode body,
+      html.hde-selection-mode * {
+        cursor: crosshair !important;
+      }
+    `,
+    highlight: `
+      .hde-highlight {
+        outline: 2px dashed #3b82f6 !important;
+        outline-offset: 2px;
+        background-color: rgba(59, 130, 246, 0.1) !important;
+      }
+    `,
+    hidden: `
+      .hde-hidden {
+        display: none !important;
+      }
+    `,
+  };
 
   constructor() {
-    console.log('Content script initialized');
+    console.log('Content script loading...');
     this.connection = new ConnectionManager();
     this.currentDomain = new URL(window.location.href).hostname;
+
+    this.initialize();
+  }
+
+  private async initialize() {
+    console.log('Content script initialized');
     console.log('Current domain:', this.currentDomain);
 
     this.injectStyles();
     this.setupMessageListeners();
     this.setupEventListeners();
-    this.loadSavedSettings();
-
-    // ドメイン情報をサイドパネルに送信
+    await this.loadSavedSettings();
     this.notifyDomain();
   }
 
@@ -39,28 +78,7 @@ class ContentScript {
     if (!document.getElementById('hde-styles')) {
       const style = document.createElement('style');
       style.id = 'hde-styles';
-      style.textContent = `
-        .hde-selection-mode,
-        .hde-selection-mode * {
-          cursor: crosshair !important;
-        }
-        
-        .hde-highlight {
-          outline: 2px dashed #3b82f6 !important;
-          outline-offset: 2px;
-          background-color: rgba(59, 130, 246, 0.1) !important;
-        }
-        
-        .hde-hidden {
-          display: none !important;
-        }
-
-        html.hde-selection-mode,
-        html.hde-selection-mode body,
-        html.hde-selection-mode * {
-          cursor: crosshair !important;
-        }
-      `;
+      style.textContent = Object.values(ContentScript.STYLES).join('\n');
       document.head.appendChild(style);
     }
   }
@@ -70,79 +88,50 @@ class ContentScript {
       const settings = await StorageManager.getDomainSettings(this.currentDomain);
       console.log('Loaded settings:', settings);
 
-      if (settings.hiddenElements && settings.hiddenElements.length > 0) {
-        settings.hiddenElements.forEach((identifier) => {
-          this.hideElement(identifier);
-        });
-      }
+      settings.hiddenElements?.forEach((identifier) => this.hideElement(identifier));
     } catch (error) {
       console.error('Error loading settings:', error);
     }
   }
 
-  private hideElement(identifier: ElementIdentifier) {
-    console.log('Hiding element:', identifier);
+  private findElement(identifier: ElementIdentifier): Element | null {
     try {
-      let element: Element | null = null;
+      // まずdomPathで検索
+      let element = document.querySelector(identifier.domPath);
+      if (element) return element;
 
-      try {
-        element = document.querySelector(identifier.domPath);
-      } catch (e) {
-        console.log('Failed to find element by domPath:', e);
-      }
-
-      if (!element) {
-        const elements = document.getElementsByTagName(identifier.tagName);
-        for (const el of Array.from(elements)) {
-          if (
+      // 代替の検索方法
+      const elements = document.getElementsByTagName(identifier.tagName);
+      return (
+        Array.from(elements).find(
+          (el) =>
             identifier.classNames.every((className) => el.classList.contains(className)) &&
             (!identifier.id || el.id === identifier.id)
-          ) {
-            element = el;
-            break;
-          }
-        }
-      }
-
-      if (element) {
-        element.classList.add('hde-hidden');
-        console.log('Element hidden successfully');
-      }
+        ) || null
+      );
     } catch (error) {
-      console.error('Error hiding element:', error);
+      console.error('Error finding element:', error);
+      return null;
+    }
+  }
+
+  private hideElement(identifier: ElementIdentifier) {
+    console.log('Hiding element:', identifier);
+    const element = this.findElement(identifier);
+
+    if (element) {
+      element.classList.add('hde-hidden');
+      console.log('Element hidden successfully');
     }
   }
 
   private showElement(identifier: ElementIdentifier) {
     console.log('Showing element:', identifier);
-    try {
-      let element: Element | null = null;
+    const element = this.findElement(identifier);
 
-      try {
-        element = document.querySelector(identifier.domPath);
-      } catch (e) {
-        console.log('Failed to find element by domPath:', e);
-      }
-
-      if (!element) {
-        const elements = document.getElementsByTagName(identifier.tagName);
-        for (const el of Array.from(elements)) {
-          if (
-            identifier.classNames.every((className) => el.classList.contains(className)) &&
-            (!identifier.id || el.id === identifier.id)
-          ) {
-            element = el;
-            break;
-          }
-        }
-      }
-
-      if (element) {
-        element.classList.remove('hde-hidden');
-        console.log('Element shown successfully');
-      }
-    } catch (error) {
-      console.error('Error showing element:', error);
+    if (element) {
+      element.classList.remove('hde-hidden');
+      console.log('Element shown successfully');
     }
   }
 
@@ -157,29 +146,40 @@ class ContentScript {
     const port = this.connection.connect('content-script');
     console.log('Content script connected to background');
 
-    port.onMessage.addListener((message) => {
+    port.onMessage.addListener((message: MessagePayload) => {
       console.log('Content script received message:', message);
-      switch (message.type) {
-        case 'TOGGLE_SELECTION_MODE':
-          this.toggleSelectionMode(message.enabled);
-          break;
-        case 'HIDE_ELEMENT':
-          this.hideElement(message.identifier);
-          break;
-        case 'SHOW_ELEMENT':
-          this.showElement(message.identifier);
-          break;
-        case 'CLEAR_ALL':
-          this.showAllElements();
-          break;
-      }
+      this.handleMessage(message);
     });
+  }
+
+  private handleMessage(message: MessagePayload) {
+    switch (message.type) {
+      case 'TOGGLE_SELECTION_MODE':
+        this.toggleSelectionMode(message.enabled || false);
+        break;
+      case 'HIDE_ELEMENT':
+        message.identifier && this.hideElement(message.identifier);
+        break;
+      case 'SHOW_ELEMENT':
+        message.identifier && this.showElement(message.identifier);
+        break;
+      case 'CLEAR_ALL':
+        this.showAllElements();
+        break;
+    }
   }
 
   private toggleSelectionMode(enabled: boolean) {
     console.log('Selection mode toggled:', enabled);
 
-    // 既存のモードをクリーンアップ
+    this.cleanupSelectionMode();
+    this.isSelectionMode = enabled;
+    this.applySelectionMode(enabled);
+
+    this.logSelectionModeState();
+  }
+
+  private cleanupSelectionMode() {
     if (this.isSelectionMode) {
       document.documentElement.classList.remove('hde-selection-mode');
       document.body.classList.remove('hde-selection-mode');
@@ -188,23 +188,21 @@ class ContentScript {
         this.hoveredElement = null;
       }
     }
+  }
 
-    // 新しいモードを設定
-    this.isSelectionMode = enabled;
-
+  private applySelectionMode(enabled: boolean) {
     if (enabled) {
       document.documentElement.classList.add('hde-selection-mode');
       document.body.classList.add('hde-selection-mode');
-
-      // 直接スタイルも適用
       document.documentElement.style.setProperty('cursor', 'crosshair', 'important');
       document.body.style.setProperty('cursor', 'crosshair', 'important');
     } else {
       document.documentElement.style.removeProperty('cursor');
       document.body.style.removeProperty('cursor');
     }
+  }
 
-    // 状態をログ出力
+  private logSelectionModeState() {
     console.log('Selection mode state:', {
       isSelectionMode: this.isSelectionMode,
       hasSelectionModeClass: document.documentElement.classList.contains('hde-selection-mode'),
@@ -227,15 +225,13 @@ class ContentScript {
   private setupEventListeners() {
     const handleMouseOver = (e: MouseEvent) => {
       if (!this.isSelectionMode) return;
-      const target = e.target as Element;
-      this.highlightElement(target);
+      this.highlightElement(e.target as Element);
     };
 
     const handleMouseOut = (e: MouseEvent) => {
       if (!this.isSelectionMode || !this.hoveredElement) return;
-      const target = e.target as Element;
-      if (target === this.hoveredElement) {
-        target.classList.remove('hde-highlight');
+      if (e.target === this.hoveredElement) {
+        this.hoveredElement.classList.remove('hde-highlight');
         this.hoveredElement = null;
       }
     };
@@ -264,7 +260,6 @@ class ContentScript {
     document.addEventListener('mouseout', handleMouseOut, true);
     document.addEventListener('click', handleClick, true);
 
-    // cleanup関数を返す
     return () => {
       document.removeEventListener('mouseover', handleMouseOver, true);
       document.removeEventListener('mouseout', handleMouseOut, true);
@@ -274,5 +269,4 @@ class ContentScript {
 }
 
 // シングルトンインスタンスを作成
-console.log('Content script loading...');
 const contentScript = new ContentScript();

@@ -1,65 +1,100 @@
 // src/background/background.ts
-let connections: { [key: string]: chrome.runtime.Port } = {};
-let currentDomain: string | null = null;
+interface Connection {
+  [key: string]: chrome.runtime.Port;
+}
 
-// サイドパネルの有効化
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((error) => console.error('Failed to set panel behavior:', error));
+interface DomainInfo {
+  domain: string;
+  url?: string;
+}
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Extension installed');
-  connections = {};
-});
+// グローバル状態の管理
+const state = {
+  connections: {} as Connection,
+  currentDomain: null as string | null,
+};
 
-chrome.runtime.onConnect.addListener((port) => {
+// サイドパネルの初期設定
+const initializeSidePanel = async () => {
+  try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } catch (error) {
+    console.error('Failed to set panel behavior:', error);
+  }
+};
+
+// メッセージの転送処理
+const forwardMessage = (sourcePort: chrome.runtime.Port, message: any) => {
+  Object.entries(state.connections).forEach(([name, connection]) => {
+    if (name !== sourcePort.name) {
+      try {
+        connection.postMessage(message);
+      } catch (error) {
+        console.error(`Failed to forward message to ${name}:`, error);
+      }
+    }
+  });
+};
+
+// ドメイン情報の処理
+const handleDomainInfo = (message: { payload: DomainInfo }) => {
+  state.currentDomain = message.payload.domain;
+
+  if (state.connections['sidepanel']) {
+    state.connections['sidepanel'].postMessage({
+      type: 'DOMAIN_INFO',
+      payload: message.payload,
+    });
+  }
+};
+
+// ポート接続の管理
+const handlePortConnection = (port: chrome.runtime.Port) => {
   console.log('New connection:', port.name);
 
-  if (connections[port.name]) {
+  // 既存の接続を切断
+  if (state.connections[port.name]) {
     console.log('Disconnecting existing connection:', port.name);
-    connections[port.name].disconnect();
+    state.connections[port.name].disconnect();
   }
 
-  connections[port.name] = port;
+  // 新しい接続を保存
+  state.connections[port.name] = port;
 
+  // メッセージリスナーの設定
   port.onMessage.addListener((message) => {
     console.log('Received message in background:', message);
 
     if (message.type === 'DOMAIN_INFO') {
-      currentDomain = message.payload.domain;
-      // サイドパネルに転送
-      if (connections['sidepanel']) {
-        connections['sidepanel'].postMessage({
-          type: 'DOMAIN_INFO',
-          payload: message.payload,
-        });
-      }
+      handleDomainInfo(message);
     } else {
-      // 他のメッセージの転送
-      Object.entries(connections).forEach(([name, connection]) => {
-        if (name !== port.name) {
-          try {
-            connection.postMessage(message);
-          } catch (error) {
-            console.error(`Failed to forward message to ${name}:`, error);
-          }
-        }
-      });
+      forwardMessage(port, message);
     }
   });
 
-  // 新しい接続がサイドパネルの場合、現在のドメイン情報を送信
-  if (port.name === 'sidepanel' && currentDomain) {
+  // サイドパネル接続時の初期化
+  if (port.name === 'sidepanel' && state.currentDomain) {
     port.postMessage({
       type: 'DOMAIN_INFO',
-      payload: {
-        domain: currentDomain,
-      },
+      payload: { domain: state.currentDomain },
     });
   }
 
+  // 切断ハンドラの設定
   port.onDisconnect.addListener(() => {
     console.log('Disconnected:', port.name);
-    delete connections[port.name];
+    delete state.connections[port.name];
   });
+};
+
+// 拡張機能のインストール/更新時の初期化
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('Extension installed');
+  state.connections = {};
 });
+
+// ポート接続リスナーの設定
+chrome.runtime.onConnect.addListener(handlePortConnection);
+
+// サイドパネルの初期化
+initializeSidePanel();
