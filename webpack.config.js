@@ -36,15 +36,15 @@ module.exports = {
       patterns: [
         {
           from: 'manifest.json',
-          to: 'manifest.json'
+          to: 'manifest.json',
         },
         {
           from: 'public/sidepanel.html',
-          to: 'sidepanel.html'
+          to: 'sidepanel.html',
         },
         {
           from: 'src/styles',
-          to: 'styles'
+          to: 'styles',
         },
       ],
     }),

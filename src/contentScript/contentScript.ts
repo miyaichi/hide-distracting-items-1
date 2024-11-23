@@ -1,67 +1,45 @@
-// src/contentScript/contentScript.ts
-import { ElementIdentifier } from '../types/types';
+import { DomainSettings, ElementIdentifier } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
 import { ElementFinder } from '../utils/elementFinder';
 import { StorageManager } from '../utils/storageManager';
 
-interface MessagePayload {
-  type: string;
-  enabled?: boolean;
-  identifier?: ElementIdentifier;
-}
-
-interface StyleDefinitions {
-  [key: string]: string;
-}
-
 class ContentScript {
+  private static instance: ContentScript | null = null;
   private readonly connection: ConnectionManager;
-  private readonly currentDomain: string;
   private isSelectionMode = false;
   private hoveredElement: Element | null = null;
+  private currentDomain: string;
 
-  // スタイル定義
-  private static readonly STYLES: StyleDefinitions = {
-    selectionMode: `
-      .hde-selection-mode,
-      .hde-selection-mode *,
-      html.hde-selection-mode,
-      html.hde-selection-mode body,
-      html.hde-selection-mode * {
-        cursor: crosshair !important;
-      }
-    `,
-    highlight: `
-      .hde-highlight {
-        outline: 2px dashed #3b82f6 !important;
-        outline-offset: 2px;
-        background-color: rgba(59, 130, 246, 0.1) !important;
-      }
-    `,
-    hidden: `
-      .hde-hidden {
-        display: none !important;
-      }
-    `,
-  };
-
-  constructor() {
-    console.log('Content script loading...');
+  private constructor() {
+    console.log('Content script instance created');
     this.connection = new ConnectionManager();
     this.currentDomain = new URL(window.location.href).hostname;
-
-    this.initialize();
-  }
-
-  private async initialize() {
-    console.log('Content script initialized');
-    console.log('Current domain:', this.currentDomain);
 
     this.injectStyles();
     this.setupMessageListeners();
     this.setupEventListeners();
-    await this.loadSavedSettings();
     this.notifyDomain();
+  }
+
+  public static getInstance(): ContentScript {
+    if (!ContentScript.instance) {
+      console.log('Creating new ContentScript instance');
+      ContentScript.instance = new ContentScript();
+    } else {
+      console.log('Returning existing ContentScript instance');
+    }
+    return ContentScript.instance;
+  }
+
+  public static isInstantiated(): boolean {
+    return !!ContentScript.instance;
+  }
+
+  public reinitialize(): void {
+    console.log('Reinitializing content script');
+    this.currentDomain = new URL(window.location.href).hostname;
+    this.notifyDomain();
+    this.loadSavedSettings();
   }
 
   private notifyDomain() {
@@ -78,60 +56,113 @@ class ContentScript {
     if (!document.getElementById('hde-styles')) {
       const style = document.createElement('style');
       style.id = 'hde-styles';
-      style.textContent = Object.values(ContentScript.STYLES).join('\n');
+      style.textContent = this.getInjectedStyles();
       document.head.appendChild(style);
+    }
+  }
+
+  private getInjectedStyles(): string {
+    return `
+      .hde-selection-mode,
+      .hde-selection-mode * {
+        cursor: crosshair !important;
+      }
+      
+      .hde-highlight {
+        outline: 2px dashed #3b82f6 !important;
+        outline-offset: 2px;
+        background-color: rgba(59, 130, 246, 0.1) !important;
+      }
+      
+      .hde-hidden {
+        display: none !important;
+      }
+
+      html.hde-selection-mode,
+      html.hde-selection-mode body,
+      html.hde-selection-mode * {
+        cursor: crosshair !important;
+      }
+    `;
+  }
+
+  private setupMessageListeners() {
+    this.disconnectExistingConnection();
+    const port = this.connection.connect('content-script');
+    console.log('Content script connected to background');
+
+    port.onMessage.addListener(async (message) => {
+      console.log('Content script received message:', message);
+
+      switch (message.type) {
+        case 'INITIALIZE_CONTENT':
+          await this.handleInitialization(message.payload.domain);
+          break;
+        case 'TOGGLE_SELECTION_MODE':
+          this.toggleSelectionMode(message.enabled);
+          break;
+        case 'HIDE_ELEMENT':
+          this.hideElement(message.identifier);
+          break;
+        case 'SHOW_ELEMENT':
+          this.showElement(message.identifier);
+          break;
+        case 'CLEAR_ALL':
+          this.showAllElements();
+          break;
+      }
+    });
+  }
+
+  private async handleInitialization(domain: string) {
+    console.log('Handling initialization for domain:', domain);
+    if (this.currentDomain !== domain) {
+      this.currentDomain = domain;
+      await this.loadSavedSettings();
+    } else {
+      console.log('Domain unchanged, skipping initialization');
     }
   }
 
   private async loadSavedSettings() {
     try {
-      const settings = await StorageManager.getDomainSettings(this.currentDomain);
+      const settings: DomainSettings = await StorageManager.getDomainSettings(this.currentDomain);
       console.log('Loaded settings:', settings);
 
-      settings.hiddenElements?.forEach((identifier) => this.hideElement(identifier));
+      this.showAllElements();
+      this.applyHiddenElements(settings.hiddenElements);
     } catch (error) {
       console.error('Error loading settings:', error);
     }
   }
 
-  private findElement(identifier: ElementIdentifier): Element | null {
-    try {
-      // まずdomPathで検索
-      let element = document.querySelector(identifier.domPath);
-      if (element) return element;
-
-      // 代替の検索方法
-      const elements = document.getElementsByTagName(identifier.tagName);
-      return (
-        Array.from(elements).find(
-          (el) =>
-            identifier.classNames.every((className) => el.classList.contains(className)) &&
-            (!identifier.id || el.id === identifier.id)
-        ) || null
-      );
-    } catch (error) {
-      console.error('Error finding element:', error);
-      return null;
+  private applyHiddenElements(hiddenElements: ElementIdentifier[]) {
+    if (hiddenElements && hiddenElements.length > 0) {
+      hiddenElements.forEach((identifier) => {
+        this.hideElement(identifier);
+      });
     }
   }
 
   private hideElement(identifier: ElementIdentifier) {
     console.log('Hiding element:', identifier);
     const element = this.findElement(identifier);
-
     if (element) {
       element.classList.add('hde-hidden');
       console.log('Element hidden successfully');
+    } else {
+      console.error('Failed to find element to hide:', identifier);
     }
   }
 
   private showElement(identifier: ElementIdentifier) {
     console.log('Showing element:', identifier);
     const element = this.findElement(identifier);
-
     if (element) {
       element.classList.remove('hde-hidden');
       console.log('Element shown successfully');
+    } else {
+      console.error('Failed to find element to show:', identifier);
     }
   }
 
@@ -142,41 +173,24 @@ class ContentScript {
     });
   }
 
-  private setupMessageListeners() {
-    const port = this.connection.connect('content-script');
-    console.log('Content script connected to background');
-
-    port.onMessage.addListener((message: MessagePayload) => {
-      console.log('Content script received message:', message);
-      this.handleMessage(message);
-    });
-  }
-
-  private handleMessage(message: MessagePayload) {
-    switch (message.type) {
-      case 'TOGGLE_SELECTION_MODE':
-        this.toggleSelectionMode(message.enabled || false);
-        break;
-      case 'HIDE_ELEMENT':
-        message.identifier && this.hideElement(message.identifier);
-        break;
-      case 'SHOW_ELEMENT':
-        message.identifier && this.showElement(message.identifier);
-        break;
-      case 'CLEAR_ALL':
-        this.showAllElements();
-        break;
-    }
-  }
-
   private toggleSelectionMode(enabled: boolean) {
-    console.log('Selection mode toggled:', enabled);
+    if (this.isSelectionMode === enabled) return;
 
     this.cleanupSelectionMode();
     this.isSelectionMode = enabled;
-    this.applySelectionMode(enabled);
 
-    this.logSelectionModeState();
+    if (enabled) {
+      this.enableSelectionMode();
+    } else {
+      this.disableSelectionMode();
+    }
+
+    console.log('Selection mode state:', {
+      isSelectionMode: this.isSelectionMode,
+      hasSelectionModeClass: document.documentElement.classList.contains('hde-selection-mode'),
+      cursor: window.getComputedStyle(document.body).cursor,
+      htmlCursor: window.getComputedStyle(document.documentElement).cursor,
+    });
   }
 
   private cleanupSelectionMode() {
@@ -190,25 +204,16 @@ class ContentScript {
     }
   }
 
-  private applySelectionMode(enabled: boolean) {
-    if (enabled) {
-      document.documentElement.classList.add('hde-selection-mode');
-      document.body.classList.add('hde-selection-mode');
-      document.documentElement.style.setProperty('cursor', 'crosshair', 'important');
-      document.body.style.setProperty('cursor', 'crosshair', 'important');
-    } else {
-      document.documentElement.style.removeProperty('cursor');
-      document.body.style.removeProperty('cursor');
-    }
+  private enableSelectionMode() {
+    document.documentElement.classList.add('hde-selection-mode');
+    document.body.classList.add('hde-selection-mode');
+    document.documentElement.style.setProperty('cursor', 'crosshair', 'important');
+    document.body.style.setProperty('cursor', 'crosshair', 'important');
   }
 
-  private logSelectionModeState() {
-    console.log('Selection mode state:', {
-      isSelectionMode: this.isSelectionMode,
-      hasSelectionModeClass: document.documentElement.classList.contains('hde-selection-mode'),
-      cursor: window.getComputedStyle(document.body).cursor,
-      htmlCursor: window.getComputedStyle(document.documentElement).cursor,
-    });
+  private disableSelectionMode() {
+    document.documentElement.style.removeProperty('cursor');
+    document.body.style.removeProperty('cursor');
   }
 
   private highlightElement(element: Element) {
@@ -223,38 +228,9 @@ class ContentScript {
   }
 
   private setupEventListeners() {
-    const handleMouseOver = (e: MouseEvent) => {
-      if (!this.isSelectionMode) return;
-      this.highlightElement(e.target as Element);
-    };
-
-    const handleMouseOut = (e: MouseEvent) => {
-      if (!this.isSelectionMode || !this.hoveredElement) return;
-      if (e.target === this.hoveredElement) {
-        this.hoveredElement.classList.remove('hde-highlight');
-        this.hoveredElement = null;
-      }
-    };
-
-    const handleClick = (e: MouseEvent) => {
-      if (!this.isSelectionMode) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      const target = e.target as Element;
-      const identifier = ElementFinder.getElementIdentifier(target);
-      console.log('Element selected:', identifier);
-
-      this.connection.sendMessage('background', {
-        type: 'ELEMENT_SELECTED',
-        payload: {
-          identifier,
-          domain: this.currentDomain,
-        },
-      });
-
-      target.classList.add('hde-hidden');
-    };
+    const handleMouseOver = (e: MouseEvent) => this.handleMouseOver(e);
+    const handleMouseOut = (e: MouseEvent) => this.handleMouseOut(e);
+    const handleClick = (e: MouseEvent) => this.handleClick(e);
 
     document.addEventListener('mouseover', handleMouseOver, true);
     document.addEventListener('mouseout', handleMouseOut, true);
@@ -266,7 +242,88 @@ class ContentScript {
       document.removeEventListener('click', handleClick, true);
     };
   }
+
+  private handleMouseOver(e: MouseEvent) {
+    if (!this.isSelectionMode) return;
+    const target = e.target as Element;
+    this.highlightElement(target);
+  }
+
+  private handleMouseOut(e: MouseEvent) {
+    if (!this.isSelectionMode || !this.hoveredElement) return;
+    const target = e.target as Element;
+    if (target === this.hoveredElement) {
+      target.classList.remove('hde-highlight');
+      this.hoveredElement = null;
+    }
+  }
+
+  private handleClick(e: MouseEvent) {
+    if (!this.isSelectionMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const target = e.target as Element;
+    const identifier = ElementFinder.getElementIdentifier(target);
+    console.log('Element selected:', identifier);
+
+    this.connection.sendMessage('background', {
+      type: 'ELEMENT_SELECTED',
+      payload: {
+        identifier,
+        domain: this.currentDomain,
+      },
+    });
+
+    target.classList.add('hde-hidden');
+  }
+
+  private disconnectExistingConnection() {
+    if (this.connection) {
+      try {
+        this.connection.disconnect();
+      } catch (e) {
+        console.warn('Error disconnecting existing connection:', e);
+      }
+    }
+  }
+
+  private findElement(identifier: ElementIdentifier): Element | null {
+    let element: Element | null = null;
+
+    try {
+      element = document.querySelector(identifier.domPath);
+    } catch (e) {
+      console.log('Failed to find element by domPath:', e);
+    }
+
+    if (!element) {
+      const elements = document.getElementsByTagName(identifier.tagName);
+      for (const el of Array.from(elements)) {
+        if (
+          identifier.classNames.every((className) => el.classList.contains(className)) &&
+          (!identifier.id || el.id === identifier.id)
+        ) {
+          element = el;
+          break;
+        }
+      }
+    }
+
+    return element;
+  }
 }
 
-// シングルトンインスタンスを作成
-const contentScript = new ContentScript();
+// グローバルスコープでの初期化チェック
+if (!window.hasOwnProperty('hideDistractingElementsInitialized')) {
+  console.log('Content script loading for the first time...');
+  // @ts-ignore
+  window.hideDistractingElementsInitialized = true;
+  const contentScript = ContentScript.getInstance();
+} else {
+  console.log('Content script already initialized, reinitializing...');
+  if (ContentScript.isInstantiated()) {
+    const instance = ContentScript.getInstance();
+    instance.reinitialize();
+  }
+}

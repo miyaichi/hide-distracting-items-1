@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Hide distracting elements on web pages",
   "permissions": ["storage", "activeTab", "scripting", "sidePanel"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background/background.js"
   },
