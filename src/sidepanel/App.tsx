@@ -15,26 +15,29 @@ export const App: React.FC = () => {
   useEffect(() => {
     console.log('Side panel App mounted');
 
-    // Get current tab's domain and load settings
-    chrome.tabs.query({ active: true, currentWindow: true }, async ([tab]) => {
-      if (tab.url) {
-        const domain = new URL(tab.url).hostname;
-        console.log('Current domain:', domain);
-        setCurrentDomain(domain);
-        const settings = await StorageManager.getDomainSettings(domain);
-        console.log('Loaded settings:', settings);
-        setHiddenElements(settings.hiddenElements);
-      }
-    });
-
-    // Setup message listeners
     const port = connection.connect('sidepanel');
     console.log('Side panel connected');
 
     port.onMessage.addListener((message) => {
       console.log('Side panel received message:', message);
-      if (message.type === 'ELEMENT_SELECTED') {
-        handleElementSelected(message.identifier);
+
+      switch (message.type) {
+        case 'DOMAIN_INFO':
+          const domain = message.payload.domain;
+          console.log('Received domain info:', domain);
+          setCurrentDomain(domain);
+          // ドメインが設定されたら設定を読み込む
+          StorageManager.getDomainSettings(domain).then((settings) => {
+            console.log('Loaded settings for domain:', domain, settings);
+            setHiddenElements(settings.hiddenElements);
+          });
+          break;
+
+        case 'ELEMENT_SELECTED':
+          // ドメイン情報をメッセージから取得
+          const { identifier, domain: messageDomain } = message.payload;
+          handleElementSelected(identifier, messageDomain);
+          break;
       }
     });
 
@@ -44,19 +47,32 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const handleElementSelected = async (element: ElementIdentifier) => {
+  const handleElementSelected = async (element: ElementIdentifier, domain: string) => {
+    // currentDomainの状態に依存せず、メッセージから受け取ったドメインを使用
+    console.log('Handling element selection for domain:', domain);
     const newElements = [...hiddenElements, element];
     setHiddenElements(newElements);
 
-    await StorageManager.saveDomainSettings(currentDomain, {
+    await StorageManager.saveDomainSettings(domain, {
       hiddenElements: newElements,
       enabled: true,
     });
   };
 
   const handleRemoveElement = async (element: ElementIdentifier) => {
+    if (!currentDomain) {
+      console.error('No current domain set');
+      return;
+    }
+
     const newElements = hiddenElements.filter((e) => e.domPath !== element.domPath);
     setHiddenElements(newElements);
+
+    // コンテンツスクリプトに要素を表示するよう通知
+    connection.sendMessage('content-script', {
+      type: 'SHOW_ELEMENT',
+      identifier: element,
+    });
 
     await StorageManager.saveDomainSettings(currentDomain, {
       hiddenElements: newElements,
@@ -73,7 +89,18 @@ export const App: React.FC = () => {
   };
 
   const handleClearAll = async () => {
+    if (!currentDomain) {
+      console.error('No current domain set');
+      return;
+    }
+
     setHiddenElements([]);
+
+    // コンテンツスクリプトにすべての要素を表示するよう通知
+    connection.sendMessage('content-script', {
+      type: 'CLEAR_ALL',
+    });
+
     await StorageManager.saveDomainSettings(currentDomain, {
       hiddenElements: [],
       enabled: true,

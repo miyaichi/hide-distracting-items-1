@@ -1,27 +1,42 @@
 // src/utils/connectionManager.ts
 export class ConnectionManager {
-  private connections: { [key: string]: chrome.runtime.Port } = {};
+  private port: chrome.runtime.Port | null = null;
 
-  connect(name: string) {
+  connect(name: string): chrome.runtime.Port {
     console.log(`Connecting as ${name}...`);
-    const port = chrome.runtime.connect({ name });
 
-    port.onDisconnect.addListener(() => {
+    // 既存の接続があれば切断
+    if (this.port) {
+      console.log('Disconnecting existing connection');
+      this.port.disconnect();
+    }
+
+    // 新しい接続を確立
+    this.port = chrome.runtime.connect({ name });
+
+    this.port.onDisconnect.addListener(() => {
       console.log(`Disconnected: ${name}`);
-      delete this.connections[name];
+      this.port = null;
     });
 
-    this.connections[name] = port;
     console.log(`Connected as ${name}`);
-    return port;
+    return this.port;
   }
 
   sendMessage(target: string, message: any) {
     console.log(`Sending message to ${target}:`, message);
-    if (this.connections[target]) {
-      this.connections[target].postMessage(message);
+    if (this.port) {
+      try {
+        this.port.postMessage({ target, ...message });
+        console.log('Message sent successfully');
+      } catch (error) {
+        console.error('Failed to send message:', error);
+      }
     } else {
-      console.error(`No connection found for ${target}`);
+      console.error('No connection available. Attempting to reconnect...');
+      // 接続を再確立して再試行
+      const newPort = this.connect(target);
+      newPort.postMessage({ target, ...message });
     }
   }
 }
