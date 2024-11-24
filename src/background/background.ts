@@ -1,21 +1,22 @@
 // src/background/background.ts
 
 interface Connection {
-  [key: string]: chrome.runtime.Port;
+  name: string;
+  port: chrome.runtime.Port;
 }
 
-interface DomainInfo {
-  domain: string;
-  url?: string;
+interface Message {
+  type: string;
+  payload: any;
 }
 
 class BackgroundService {
   private static instance: BackgroundService;
-  private connections: Connection;
+  private readonly connections: Map<string, Connection>;
   private currentDomain: string | null;
 
   private constructor() {
-    this.connections = {};
+    this.connections = new Map();
     this.currentDomain = null;
     this.initialize();
   }
@@ -27,103 +28,130 @@ class BackgroundService {
     return BackgroundService.instance;
   }
 
+  // Initialize
   private async initialize(): Promise<void> {
-    // 拡張機能のインストール/更新時のリスナー
+    this.setupInstallListener();
+    this.setupConnectionListener();
+    await this.initializeSidePanel();
+  }
+
+  private setupInstallListener(): void {
     chrome.runtime.onInstalled.addListener(() => {
       console.log('[background] Extension installed');
-      this.connections = {};
+      this.connections.clear();
     });
+  }
 
-    // ポート接続リスナーの設定
+  private setupConnectionListener(): void {
     chrome.runtime.onConnect.addListener(this.handlePortConnection.bind(this));
-
-    // サイドパネルの初期化
-    await this.initializeSidePanel();
   }
 
   private async initializeSidePanel(): Promise<void> {
     try {
       await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
     } catch (error) {
-      console.error('Failed to set panel behavior:', error);
+      console.error('[background] Failed to set panel behavior:', error);
     }
   }
 
-  private forwardMessage(sourcePort: chrome.runtime.Port, message: any): void {
-    console.log(`[background] Forwarding message from ${sourcePort.name}:`, message);
-    Object.entries(this.connections).forEach(([name, connection]) => {
-      if (name !== sourcePort.name) {
-        try {
-          console.log(`[Background] Forwarding message to ${name}:`, message);
-          connection.postMessage(message);
-        } catch (error) {
-          console.error(`Failed to forward message to ${name}:`, error);
-        }
-      }
+  // Connection handling
+  private handlePortConnection(port: chrome.runtime.Port): void {
+    console.log('[background] New connection:', port.name);
+    this.updateConnection(port);
+    this.setupMessageListener(port);
+    this.setupDisconnectListener(port);
+    this.initializeConnection(port);
+  }
+
+  private updateConnection(port: chrome.runtime.Port): void {
+    const existingConnection = this.connections.get(port.name);
+    if (existingConnection) {
+      console.log('[background] Updating existing connection:', port.name);
+      existingConnection.port.disconnect();
+    }
+
+    this.connections.set(port.name, {
+      name: port.name,
+      port: port,
     });
   }
 
-  private handleDomainInfo(message: { payload: DomainInfo }): void {
-    this.currentDomain = message.payload.domain;
+  private setupMessageListener(port: chrome.runtime.Port): void {
+    port.onMessage.addListener((message: Message) => {
+      console.log('[background] Received message:', message);
+      this.handleMessage(port.name, message);
+    });
+  }
 
-    if (this.connections['sidepanel']) {
-      console.log('[background] POSTING DOMAIN INFO:', message.payload);
-      this.connections['sidepanel'].postMessage({
+  private setupDisconnectListener(port: chrome.runtime.Port): void {
+    port.onDisconnect.addListener(() => {
+      console.log('[background] Disconnected:', port.name);
+      this.connections.delete(port.name);
+    });
+  }
+
+  private initializeConnection(port: chrome.runtime.Port): void {
+    if (port.name === 'sidepanel' && this.currentDomain) {
+      console.log('[background] Initializing sidepanel with domain:', this.currentDomain);
+      this.sendMessage(port, {
+        type: 'DOMAIN_INFO',
+        payload: { domain: this.currentDomain },
+      });
+    }
+  }
+
+  // Message handling
+  private handleMessage(sourceName: string, message: Message): void {
+    switch (message.type) {
+      case 'DOMAIN_INFO':
+        this.handleDomainInfo(message);
+        break;
+      default:
+        this.forwardMessage(sourceName, message);
+        break;
+    }
+  }
+
+  private handleDomainInfo(message: Message): void {
+    this.currentDomain = message.payload.domain;
+    const sidepanelConnection = this.connections.get('sidepanel');
+
+    if (sidepanelConnection) {
+      console.log('[background] Forwarding domain info:', message.payload);
+      this.sendMessage(sidepanelConnection.port, {
         type: 'DOMAIN_INFO',
         payload: message.payload,
       });
     }
   }
 
-  private handlePortConnection(port: chrome.runtime.Port): void {
-    console.log('[background] New connection:', port.name);
+  private forwardMessage(sourceName: string, message: Message): void {
+    console.log('[background] Forwarding message from:', sourceName);
 
-    // 既存の接続を切断
-    if (this.connections[port.name]) {
-      console.log('[background] Disconnecting existing connection:', port.name);
-      this.connections[port.name].disconnect();
-    }
-
-    // 新しい接続を保存
-    this.connections[port.name] = port;
-
-    // メッセージリスナーの設定
-    port.onMessage.addListener((message) => {
-      console.log('[background] Received message in background:', message);
-      if (message.type === 'DOMAIN_INFO') {
-        this.handleDomainInfo(message);
-      } else {
-        this.forwardMessage(port, message);
+    for (const [name, connection] of this.connections.entries()) {
+      if (name !== sourceName) {
+        this.sendMessage(connection.port, message);
       }
-    });
-
-    // サイドパネル接続時の初期化
-    if (port.name === 'sidepanel' && this.currentDomain) {
-      console.log('[background] POSTING DOMAIN INFO:', this.currentDomain);
-      port.postMessage({
-        type: 'DOMAIN_INFO',
-        payload: { domain: this.currentDomain },
-      });
     }
-
-    // 切断ハンドラの設定
-    port.onDisconnect.addListener(() => {
-      console.log('[background] Disconnected:', port.name);
-      delete this.connections[port.name];
-    });
   }
 
-  // 公開メソッド
+  private sendMessage(port: chrome.runtime.Port, message: Message): void {
+    try {
+      port.postMessage(message);
+    } catch (error) {
+      console.error(`[background] Failed to send message to ${port.name}:`, error);
+    }
+  }
+
+  // Public methods
   public getCurrentDomain(): string | null {
     return this.currentDomain;
   }
 
-  public getConnections(): Connection {
-    return { ...this.connections };
+  public getConnections(): Map<string, Connection> {
+    return new Map(this.connections);
   }
 }
 
-// BackgroundServiceのインスタンスを作成して初期化
 const backgroundService = BackgroundService.getInstance();
-
 export default backgroundService;
