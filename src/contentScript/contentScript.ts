@@ -11,7 +11,7 @@ class ContentScript {
   private currentDomain: string;
 
   private constructor() {
-    console.log('Content script instance created');
+    console.log('[contentScript] Content script instance created');
     this.connection = new ConnectionManager();
     this.currentDomain = new URL(window.location.href).hostname;
 
@@ -23,10 +23,10 @@ class ContentScript {
 
   public static getInstance(): ContentScript {
     if (!ContentScript.instance) {
-      console.log('Creating new ContentScript instance');
+      console.log('[contentScript] Creating new ContentScript instance');
       ContentScript.instance = new ContentScript();
     } else {
-      console.log('Returning existing ContentScript instance');
+      console.log('[contentScript] Returning existing ContentScript instance');
     }
     return ContentScript.instance;
   }
@@ -36,7 +36,7 @@ class ContentScript {
   }
 
   public reinitialize(): void {
-    console.log('Reinitializing content script');
+    console.log('[contentScript] Reinitializing content script');
     this.currentDomain = new URL(window.location.href).hostname;
     this.notifyDomain();
     this.loadSavedSettings();
@@ -89,10 +89,10 @@ class ContentScript {
   private setupMessageListeners() {
     this.disconnectExistingConnection();
     const port = this.connection.connect('content-script');
-    console.log('Content script connected to background');
+    console.log('[contentScript] Content script connected to background');
 
     port.onMessage.addListener(async (message) => {
-      console.log('Content script received message:', message);
+      console.log('[contentScript] Content script received message:', message);
 
       switch (message.type) {
         case 'INITIALIZE_CONTENT':
@@ -115,19 +115,19 @@ class ContentScript {
   }
 
   private async handleInitialization(domain: string) {
-    console.log('Handling initialization for domain:', domain);
+    console.log('[contentScript] Handling initialization for domain:', domain);
     if (this.currentDomain !== domain) {
       this.currentDomain = domain;
       await this.loadSavedSettings();
     } else {
-      console.log('Domain unchanged, skipping initialization');
+      console.log('[contentScript] Domain unchanged, skipping initialization');
     }
   }
 
   private async loadSavedSettings() {
     try {
       const settings: DomainSettings = await StorageManager.getDomainSettings(this.currentDomain);
-      console.log('Loaded settings:', settings);
+      console.log('[contentScript] Loaded settings:', settings);
 
       this.showAllElements();
       this.applyHiddenElements(settings.hiddenElements);
@@ -145,22 +145,22 @@ class ContentScript {
   }
 
   private hideElement(identifier: ElementIdentifier) {
-    console.log('Hiding element:', identifier);
+    console.log('[contentScript] Hiding element:', identifier);
     const element = this.findElement(identifier);
     if (element) {
       element.classList.add('hde-hidden');
-      console.log('Element hidden successfully');
+      console.log('[contentScript] Element hidden successfully');
     } else {
       console.error('Failed to find element to hide:', identifier);
     }
   }
 
   private showElement(identifier: ElementIdentifier) {
-    console.log('Showing element:', identifier);
+    console.log('[contentScript] Showing element:', identifier);
     const element = this.findElement(identifier);
     if (element) {
       element.classList.remove('hde-hidden');
-      console.log('Element shown successfully');
+      console.log('[contentScript] Element shown successfully');
     } else {
       console.error('Failed to find element to show:', identifier);
     }
@@ -185,7 +185,7 @@ class ContentScript {
       this.disableSelectionMode();
     }
 
-    console.log('Selection mode state:', {
+    console.log('[contentScript] Selection mode state:', {
       isSelectionMode: this.isSelectionMode,
       hasSelectionModeClass: document.documentElement.classList.contains('hde-selection-mode'),
       cursor: window.getComputedStyle(document.body).cursor,
@@ -265,7 +265,7 @@ class ContentScript {
 
     const target = e.target as Element;
     const identifier = ElementFinder.getElementIdentifier(target);
-    console.log('Element selected:', identifier);
+    console.log('[contentScript] Element selected:', identifier);
 
     this.connection.sendMessage('background', {
       type: 'ELEMENT_SELECTED',
@@ -294,7 +294,7 @@ class ContentScript {
     try {
       element = document.querySelector(identifier.domPath);
     } catch (e) {
-      console.log('Failed to find element by domPath:', e);
+      console.log('[contentScript] Failed to find element by domPath:', e);
     }
 
     if (!element) {
@@ -316,12 +316,12 @@ class ContentScript {
 
 // グローバルスコープでの初期化チェック
 if (!window.hasOwnProperty('hideDistractingElementsInitialized')) {
-  console.log('Content script loading for the first time...');
+  console.log('[contentScript] Content script loading for the first time...');
   // @ts-ignore
   window.hideDistractingElementsInitialized = true;
   const contentScript = ContentScript.getInstance();
 } else {
-  console.log('Content script already initialized, reinitializing...');
+  console.log('[contentScript] Content script already initialized, reinitializing...');
   if (ContentScript.isInstantiated()) {
     const instance = ContentScript.getInstance();
     instance.reinitialize();
