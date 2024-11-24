@@ -121,16 +121,6 @@ class ContentScript {
     });
   }
 
-  private NotifyApplyRules(rules: number, applyed: number) {
-    this.connection.sendMessage('background', {
-      type: 'APPLYED_RULES',
-      payload: {
-        rules: rules,
-        applyed: applyed,
-      },
-    });
-  }
-
   private async handleInitialization(domain: string) {
     logger.debug('Handling initialization for domain:', domain);
     if (this.currentDomain !== domain) {
@@ -154,6 +144,17 @@ class ContentScript {
     } catch (error) {
       logger.error('Error loading settings:', error);
     }
+  }
+
+  private NotifyApplyRules(rules: number, applyed: number) {
+    this.connection.sendMessage('background', {
+      type: 'CONTENT_ACTION',
+      payload: {
+        action: 'APPLY_RULES',
+        rules,
+        applyed,
+      },
+    });
   }
 
   private applyHiddenElements(hiddenElements: ElementIdentifier[]): number {
