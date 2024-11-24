@@ -121,6 +121,16 @@ class ContentScript {
     });
   }
 
+  private NotifyApplyRules(rules: number, applyed: number) {
+    this.connection.sendMessage('background', {
+      type: 'APPLYED_RULES',
+      payload: {
+        rules: rules,
+        applyed: applyed,
+      },
+    });
+  }
+
   private async handleInitialization(domain: string) {
     logger.debug('Handling initialization for domain:', domain);
     if (this.currentDomain !== domain) {
@@ -137,28 +147,37 @@ class ContentScript {
       logger.debug('Loaded settings:', settings);
 
       this.showAllElements();
-      this.applyHiddenElements(settings.hiddenElements);
+      const rules = settings.hiddenElements.length;
+      const applyed = this.applyHiddenElements(settings.hiddenElements);
+      logger.debug(`Applied ${applyed} / ${rules} rules`);
+      this.NotifyApplyRules(rules, applyed);
     } catch (error) {
       logger.error('Error loading settings:', error);
     }
   }
 
-  private applyHiddenElements(hiddenElements: ElementIdentifier[]) {
+  private applyHiddenElements(hiddenElements: ElementIdentifier[]): number {
+    let applyed = 0;
     if (hiddenElements && hiddenElements.length > 0) {
       hiddenElements.forEach((identifier) => {
-        this.hideElement(identifier);
+        if (this.hideElement(identifier)) {
+          applyed++;
+        }
       });
     }
+    return applyed;
   }
 
-  private hideElement(identifier: ElementIdentifier) {
+  private hideElement(identifier: ElementIdentifier): boolean {
     logger.debug('Hiding element:', identifier);
     const element = this.findElement(identifier);
     if (element) {
       element.classList.add('hde-hidden');
       logger.debug('Element hidden successfully');
+      return true;
     } else {
       logger.warn('Failed to find element to hide:', identifier);
+      return false;
     }
   }
 
