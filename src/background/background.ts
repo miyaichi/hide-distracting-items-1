@@ -57,14 +57,12 @@ class BackgroundService {
   }
 
   private setupTabListeners(): void {
-    // タブの切り替え検知
     chrome.tabs.onActivated.addListener(async (activeInfo) => {
       console.log('[background] Tab activated:', activeInfo.tabId);
       this.activeTabId = activeInfo.tabId;
       await this.handleTabChange(activeInfo.tabId);
     });
 
-    // タブの更新（リロード含む）検知
     chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       if (tabId === this.activeTabId && changeInfo.status === 'complete') {
         console.log('[background] Tab updated:', tabId);
@@ -74,7 +72,6 @@ class BackgroundService {
   }
 
   private setupWindowListeners(): void {
-    // ウィンドウのフォーカス変更検知
     chrome.windows.onFocusChanged.addListener(async (windowId) => {
       if (windowId !== chrome.windows.WINDOW_ID_NONE) {
         console.log('[background] Window focus changed:', windowId);
@@ -121,7 +118,7 @@ class BackgroundService {
     console.log('[background] Updating domain info:', domainInfo);
     this.currentDomain = domainInfo.domain;
 
-    // ContentScriptの初期化
+    // Initialize ContentScript
     if (this.activeTabId) {
       try {
         await chrome.tabs.sendMessage(this.activeTabId, {
@@ -131,12 +128,12 @@ class BackgroundService {
           },
         });
       } catch (error) {
-        // ContentScriptがまだ読み込まれていない可能性があるため、エラーは無視
+        // Ignore errors since the ContentScript may not be loaded yet
         console.log('[background] ContentScript not ready yet');
       }
     }
 
-    // Sidepanelに通知
+    // Notify SidePanel
     const sidepanelConnection = this.connections.get('sidepanel');
     if (sidepanelConnection) {
       this.sendMessage(sidepanelConnection.port, {
