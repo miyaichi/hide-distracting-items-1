@@ -10,14 +10,21 @@ interface Message {
   payload: any;
 }
 
+interface DomainInfo {
+  domain: string;
+  url: string;
+}
+
 class BackgroundService {
   private static instance: BackgroundService;
   private readonly connections: Map<string, Connection>;
   private currentDomain: string | null;
+  private activeTabId: number | null;
 
   private constructor() {
     this.connections = new Map();
     this.currentDomain = null;
+    this.activeTabId = null;
     this.initialize();
   }
 
@@ -32,7 +39,10 @@ class BackgroundService {
   private async initialize(): Promise<void> {
     this.setupInstallListener();
     this.setupConnectionListener();
+    this.setupTabListeners();
+    this.setupWindowListeners();
     await this.initializeSidePanel();
+    await this.initializeActiveTab();
   }
 
   private setupInstallListener(): void {
@@ -44,6 +54,96 @@ class BackgroundService {
 
   private setupConnectionListener(): void {
     chrome.runtime.onConnect.addListener(this.handlePortConnection.bind(this));
+  }
+
+  private setupTabListeners(): void {
+    // タブの切り替え検知
+    chrome.tabs.onActivated.addListener(async (activeInfo) => {
+      console.log('[background] Tab activated:', activeInfo.tabId);
+      this.activeTabId = activeInfo.tabId;
+      await this.handleTabChange(activeInfo.tabId);
+    });
+
+    // タブの更新（リロード含む）検知
+    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+      if (tabId === this.activeTabId && changeInfo.status === 'complete') {
+        console.log('[background] Tab updated:', tabId);
+        await this.handleTabChange(tabId);
+      }
+    });
+  }
+
+  private setupWindowListeners(): void {
+    // ウィンドウのフォーカス変更検知
+    chrome.windows.onFocusChanged.addListener(async (windowId) => {
+      if (windowId !== chrome.windows.WINDOW_ID_NONE) {
+        console.log('[background] Window focus changed:', windowId);
+        const tabs = await chrome.tabs.query({ active: true, windowId });
+        if (tabs[0]) {
+          this.activeTabId = tabs[0].id ?? null;
+          if (this.activeTabId) {
+            await this.handleTabChange(this.activeTabId);
+          }
+        }
+      }
+    });
+  }
+
+  private async initializeActiveTab(): Promise<void> {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        this.activeTabId = tab.id;
+        await this.handleTabChange(tab.id);
+      }
+    } catch (error) {
+      console.error('[background] Failed to initialize active tab:', error);
+    }
+  }
+
+  private async handleTabChange(tabId: number): Promise<void> {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.url) {
+        const url = new URL(tab.url);
+        const domainInfo: DomainInfo = {
+          domain: url.hostname,
+          url: tab.url,
+        };
+        await this.updateDomainInfo(domainInfo);
+      }
+    } catch (error) {
+      console.error('[background] Failed to handle tab change:', error);
+    }
+  }
+
+  private async updateDomainInfo(domainInfo: DomainInfo): Promise<void> {
+    console.log('[background] Updating domain info:', domainInfo);
+    this.currentDomain = domainInfo.domain;
+
+    // ContentScriptの初期化
+    if (this.activeTabId) {
+      try {
+        await chrome.tabs.sendMessage(this.activeTabId, {
+          type: 'INITIALIZE_CONTENT',
+          payload: {
+            domain: domainInfo.domain,
+          },
+        });
+      } catch (error) {
+        // ContentScriptがまだ読み込まれていない可能性があるため、エラーは無視
+        console.log('[background] ContentScript not ready yet');
+      }
+    }
+
+    // Sidepanelに通知
+    const sidepanelConnection = this.connections.get('sidepanel');
+    if (sidepanelConnection) {
+      this.sendMessage(sidepanelConnection.port, {
+        type: 'DOMAIN_INFO',
+        payload: domainInfo,
+      });
+    }
   }
 
   private async initializeSidePanel(): Promise<void> {
