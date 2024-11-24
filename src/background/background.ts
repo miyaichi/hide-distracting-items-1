@@ -1,4 +1,5 @@
 // src/background/background.ts
+import { Logger } from '../utils/logger';
 
 interface Connection {
   name: string;
@@ -14,6 +15,8 @@ interface DomainInfo {
   domain: string;
   url: string;
 }
+
+const logger = new Logger('Background');
 
 class BackgroundService {
   private static instance: BackgroundService;
@@ -47,7 +50,7 @@ class BackgroundService {
 
   private setupInstallListener(): void {
     chrome.runtime.onInstalled.addListener(() => {
-      console.log('[background] Extension installed');
+      logger.log('Extension installed');
       this.connections.clear();
     });
   }
@@ -58,14 +61,14 @@ class BackgroundService {
 
   private setupTabListeners(): void {
     chrome.tabs.onActivated.addListener(async (activeInfo) => {
-      console.log('[background] Tab activated:', activeInfo.tabId);
+      logger.debug('Tab activated:', activeInfo.tabId);
       this.activeTabId = activeInfo.tabId;
       await this.handleTabChange(activeInfo.tabId);
     });
 
     chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       if (tabId === this.activeTabId && changeInfo.status === 'complete') {
-        console.log('[background] Tab updated:', tabId);
+        logger.debug('Tab updated:', tabId);
         await this.handleTabChange(tabId);
       }
     });
@@ -74,7 +77,7 @@ class BackgroundService {
   private setupWindowListeners(): void {
     chrome.windows.onFocusChanged.addListener(async (windowId) => {
       if (windowId !== chrome.windows.WINDOW_ID_NONE) {
-        console.log('[background] Window focus changed:', windowId);
+        logger.debug('Window focus changed:', windowId);
         const tabs = await chrome.tabs.query({ active: true, windowId });
         if (tabs[0]) {
           this.activeTabId = tabs[0].id ?? null;
@@ -94,7 +97,7 @@ class BackgroundService {
         await this.handleTabChange(tab.id);
       }
     } catch (error) {
-      console.error('[background] Failed to initialize active tab:', error);
+      logger.error('Failed to initialize active tab:', error);
     }
   }
 
@@ -110,12 +113,12 @@ class BackgroundService {
         await this.updateDomainInfo(domainInfo);
       }
     } catch (error) {
-      console.error('[background] Failed to handle tab change:', error);
+      logger.error('Failed to handle tab change:', error);
     }
   }
 
   private async updateDomainInfo(domainInfo: DomainInfo): Promise<void> {
-    console.log('[background] Updating domain info:', domainInfo);
+    logger.log('Updating domain info:', domainInfo);
     this.currentDomain = domainInfo.domain;
 
     // Initialize ContentScript
@@ -132,7 +135,7 @@ class BackgroundService {
         }
       } catch (error) {
         // Ignore errors since the ContentScript may not be loaded yet
-        console.log('[background] ContentScript not ready yet');
+        logger.warn('ContentScript not ready yet');
       }
     }
 
@@ -150,13 +153,13 @@ class BackgroundService {
     try {
       await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
     } catch (error) {
-      console.error('[background] Failed to set panel behavior:', error);
+      logger.error('Failed to set panel behavior:', error);
     }
   }
 
   // Connection handling
   private handlePortConnection(port: chrome.runtime.Port): void {
-    console.log('[background] New connection:', port.name);
+    logger.debug('New connection:', port.name);
     this.updateConnection(port);
     this.setupMessageListener(port);
     this.setupDisconnectListener(port);
@@ -166,7 +169,7 @@ class BackgroundService {
   private updateConnection(port: chrome.runtime.Port): void {
     const existingConnection = this.connections.get(port.name);
     if (existingConnection) {
-      console.log('[background] Updating existing connection:', port.name);
+      logger.debug('Updating existing connection:', port.name);
       existingConnection.port.disconnect();
     }
 
@@ -178,21 +181,21 @@ class BackgroundService {
 
   private setupMessageListener(port: chrome.runtime.Port): void {
     port.onMessage.addListener((message: Message) => {
-      console.log('[background] Received message:', message);
+      logger.debug('Received message:', message);
       this.handleMessage(port.name, message);
     });
   }
 
   private setupDisconnectListener(port: chrome.runtime.Port): void {
     port.onDisconnect.addListener(() => {
-      console.log('[background] Disconnected:', port.name);
+      logger.log('Disconnected:', port.name);
       this.connections.delete(port.name);
     });
   }
 
   private initializeConnection(port: chrome.runtime.Port): void {
     if (port.name === 'sidepanel' && this.currentDomain) {
-      console.log('[background] Initializing sidepanel with domain:', this.currentDomain);
+      logger.debug('Initializing sidepanel with domain:', this.currentDomain);
       this.sendMessage(port, {
         type: 'DOMAIN_INFO',
         payload: { domain: this.currentDomain },
@@ -222,7 +225,7 @@ class BackgroundService {
     const sidepanelConnection = this.connections.get('sidepanel');
 
     if (sidepanelConnection) {
-      console.log('[background] Forwarding domain info:', message.payload);
+      logger.log('Forwarding domain info:', message.payload);
       this.sendMessage(sidepanelConnection.port, {
         type: 'DOMAIN_INFO',
         payload: message.payload,
@@ -231,7 +234,7 @@ class BackgroundService {
   }
 
   private forwardMessage(sourceName: string, message: Message): void {
-    console.log('[background] Forwarding message from:', sourceName, message);
+    logger.debug('Forwarding message from:', sourceName, message);
 
     for (const [name, connection] of this.connections.entries()) {
       if (name !== sourceName) {
@@ -244,7 +247,7 @@ class BackgroundService {
     try {
       port.postMessage(message);
     } catch (error) {
-      console.error(`[background] Failed to send message to ${port.name}:`, error);
+      logger.error(`Failed to send message to ${port.name}:`, error);
     }
   }
 

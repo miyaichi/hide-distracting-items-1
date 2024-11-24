@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { DomainSettings, ElementIdentifier } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
+import { Logger } from '../utils/logger';
 import { StorageManager } from '../utils/storageManager';
 import { Controls } from './components/Controls';
 import { ElementTree } from './components/ElementTree';
+
+const logger = new Logger('Sidepanel');
 
 interface MessagePayload {
   type: string;
@@ -22,16 +25,16 @@ export const App: React.FC = () => {
   const loadDomainSettings = useCallback(async (domain: string) => {
     try {
       const settings: DomainSettings = await StorageManager.getDomainSettings(domain);
-      console.log('Loaded settings for domain:', domain, settings);
+      logger.debug('Loaded settings for domain:', domain, settings);
       setHiddenElements(settings.hiddenElements);
     } catch (error) {
-      console.error('Error loading domain settings:', error);
+      logger.error('Error loading domain settings:', error);
     }
   }, []);
 
   const handleDomainChange = useCallback(
     async (newDomain: string) => {
-      console.log('Domain changed to:', newDomain);
+      logger.log('Domain changed to:', newDomain);
       setCurrentDomain(newDomain);
       setIsSelectionMode(false);
       handleToggleSelectionMode(false);
@@ -42,7 +45,7 @@ export const App: React.FC = () => {
 
   const handleMessage = useCallback(
     async (message: MessagePayload) => {
-      console.log('Side panel received message:', message);
+      logger.debug('Received message:', message);
 
       switch (message.type) {
         case 'DOMAIN_INFO': {
@@ -65,7 +68,7 @@ export const App: React.FC = () => {
   );
 
   const handleElementSelected = async (element: ElementIdentifier, domain: string) => {
-    console.log('Handling element selection for domain:', domain);
+    logger.log('Element selected for domain:', domain);
     const newElements = [...hiddenElements, element];
     setHiddenElements(newElements);
     await StorageManager.saveDomainSettings(domain, {
@@ -76,10 +79,11 @@ export const App: React.FC = () => {
 
   const handleRemoveElement = async (element: ElementIdentifier) => {
     if (!currentDomain) {
-      console.error('No current domain set');
+      logger.error('No current domain set');
       return;
     }
 
+    logger.log('Removing element:', element);
     const newElements = hiddenElements.filter((e) => e.domPath !== element.domPath);
     setHiddenElements(newElements);
 
@@ -95,12 +99,12 @@ export const App: React.FC = () => {
   };
 
   const handleToggleSelectionMode = (enabled: boolean) => {
-    console.log('Toggling selection mode:', enabled);
     if (!currentDomain) {
-      console.error('Cannot toggle selection mode: No domain set');
+      logger.error('Cannot toggle selection mode: No domain set');
       return;
     }
 
+    logger.log('Selection mode toggled:', enabled);
     setIsSelectionMode(enabled);
     connection.sendMessage('background', {
       type: 'CONTENT_ACTION',
@@ -110,10 +114,11 @@ export const App: React.FC = () => {
 
   const handleClearAll = async () => {
     if (!currentDomain) {
-      console.error('Cannot clear elements: No domain set');
+      logger.error('Cannot clear elements: No domain set');
       return;
     }
 
+    logger.log('Clearing all elements');
     setHiddenElements([]);
     connection.sendMessage('background', {
       type: 'CONTENT_ACTION',
@@ -127,15 +132,15 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    console.log('Side panel App mounted');
+    logger.log('Side panel mounted');
 
     const port = connection.connect('sidepanel');
-    console.log('Side panel connected');
+    logger.debug('Connected to background');
 
     port.onMessage.addListener(handleMessage);
 
     return () => {
-      console.log('Side panel unmounting');
+      logger.debug('Side panel unmounting');
       setIsSelectionMode(false);
       port.disconnect();
     };

@@ -1,5 +1,7 @@
-// src/utils/storageManager.ts
 import { DomainSettings, ElementIdentifier } from '../types/types';
+import { Logger } from './logger';
+
+const logger = new Logger('StorageManager');
 
 interface StorageOperation {
   success: boolean;
@@ -23,26 +25,26 @@ export class StorageManager {
    */
   static async getDomainSettings(domain: string): Promise<DomainSettings> {
     if (!this.isValidDomain(domain)) {
-      console.error('Invalid domain provided:', domain);
+      logger.error('Invalid domain provided:', domain);
       return this.DEFAULT_SETTINGS;
     }
 
     try {
-      console.log('Getting settings for domain:', domain);
+      logger.debug('Getting settings for domain:', domain);
       const result = await chrome.storage.sync.get(domain);
-      console.log('Retrieved settings:', result);
+      logger.debug('Retrieved settings:', result);
 
       const settings = result[domain] || this.DEFAULT_SETTINGS;
       const validation = this.validateSettings(settings);
 
       if (!validation.isValid) {
-        console.warn('Invalid settings found:', validation.errors);
+        logger.warn('Invalid settings found:', validation.errors);
         return this.DEFAULT_SETTINGS;
       }
 
       return settings;
     } catch (error) {
-      console.error('Error getting domain settings:', error);
+      logger.error('Error getting domain settings:', error);
       return this.DEFAULT_SETTINGS;
     }
   }
@@ -55,6 +57,7 @@ export class StorageManager {
     settings: DomainSettings
   ): Promise<StorageOperation> {
     if (!this.isValidDomain(domain)) {
+      logger.error('Invalid domain for saving settings:', domain);
       return {
         success: false,
         error: new Error('Invalid domain provided'),
@@ -63,6 +66,7 @@ export class StorageManager {
 
     const validation = this.validateSettings(settings);
     if (!validation.isValid) {
+      logger.error('Invalid settings for saving:', validation.errors);
       return {
         success: false,
         error: new Error(`Invalid settings: ${validation.errors.join(', ')}`),
@@ -70,26 +74,27 @@ export class StorageManager {
     }
 
     try {
-      console.log('Saving settings for domain:', domain);
-      console.log('Settings to save:', settings);
+      logger.debug('Saving settings for domain:', domain);
+      logger.debug('Settings to save:', settings);
 
       await chrome.storage.sync.set({ [domain]: settings });
 
       // 保存の確認
       const saved = await this.getDomainSettings(domain);
-      console.log('Verified saved settings:', saved);
+      logger.debug('Verified saved settings:', saved);
 
       const isVerified = this.areSettingsEqual(settings, saved);
       if (!isVerified) {
         throw new Error('Saved settings verification failed');
       }
 
+      logger.log('Successfully saved and verified settings for domain:', domain);
       return {
         success: true,
         data: saved,
       };
     } catch (error) {
-      console.error('Error saving domain settings:', error);
+      logger.error('Error saving domain settings:', error);
       return {
         success: false,
         error: error instanceof Error ? error : new Error('Unknown error during save'),
@@ -103,19 +108,22 @@ export class StorageManager {
   static async getAllStoredDomains(): Promise<{ [domain: string]: DomainSettings }> {
     try {
       const all = await chrome.storage.sync.get(null);
-      console.log('All stored settings:', all);
+      logger.debug('Retrieved all stored settings:', all);
 
       // 不正な設定を除外
       const validSettings: { [domain: string]: DomainSettings } = {};
       for (const [domain, settings] of Object.entries(all)) {
         if (this.isValidDomain(domain) && this.validateSettings(settings).isValid) {
           validSettings[domain] = settings as DomainSettings;
+        } else {
+          logger.warn('Invalid settings found for domain:', domain);
         }
       }
 
+      logger.debug('Filtered valid settings:', validSettings);
       return validSettings;
     } catch (error) {
-      console.error('Error getting all settings:', error);
+      logger.error('Error getting all settings:', error);
       return {};
     }
   }
@@ -126,10 +134,10 @@ export class StorageManager {
   static async clearAllSettings(): Promise<StorageOperation> {
     try {
       await chrome.storage.sync.clear();
-      console.log('All settings cleared');
+      logger.log('All settings cleared successfully');
       return { success: true };
     } catch (error) {
-      console.error('Error clearing settings:', error);
+      logger.error('Error clearing settings:', error);
       return {
         success: false,
         error: error instanceof Error ? error : new Error('Failed to clear settings'),
@@ -143,10 +151,10 @@ export class StorageManager {
   static async removeDomainSettings(domain: string): Promise<StorageOperation> {
     try {
       await chrome.storage.sync.remove(domain);
-      console.log(`Settings removed for domain: ${domain}`);
+      logger.log('Settings removed for domain:', domain);
       return { success: true };
     } catch (error) {
-      console.error(`Error removing settings for domain ${domain}:`, error);
+      logger.error(`Error removing settings for domain ${domain}:`, error);
       return {
         success: false,
         error: error instanceof Error ? error : new Error('Failed to remove settings'),
@@ -160,24 +168,35 @@ export class StorageManager {
   static async getStorageUsage(): Promise<{ bytesInUse: number; quotaBytes: number }> {
     try {
       const bytesInUse = await chrome.storage.sync.getBytesInUse();
+      logger.debug('Storage usage:', { bytesInUse, quotaBytes: chrome.storage.sync.QUOTA_BYTES });
       return {
         bytesInUse,
         quotaBytes: chrome.storage.sync.QUOTA_BYTES,
       };
     } catch (error) {
-      console.error('Error getting storage usage:', error);
+      logger.error('Error getting storage usage:', error);
       return { bytesInUse: 0, quotaBytes: 0 };
     }
   }
 
   private static isValidDomain(domain: string): boolean {
-    return (
+    const isValid =
       domain !== undefined &&
       domain !== null &&
       domain.length > 0 &&
       domain.length <= 255 &&
-      /^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]$/.test(domain)
-    );
+      /^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]$/.test(domain);
+
+    if (!isValid) {
+      logger.debug('Domain validation failed:', {
+        domain,
+        length: domain?.length,
+        isEmpty: !domain,
+        matchesRegex: /^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]$/.test(domain || ''),
+      });
+    }
+
+    return isValid;
   }
 
   private static validateSettings(settings: any): StorageValidationResult {
@@ -205,6 +224,10 @@ export class StorageManager {
       errors.push('enabled must be a boolean');
     }
 
+    if (errors.length > 0) {
+      logger.debug('Settings validation failed:', { settings, errors });
+    }
+
     return {
       isValid: errors.length === 0,
       errors,
@@ -212,16 +235,25 @@ export class StorageManager {
   }
 
   private static areSettingsEqual(a: DomainSettings, b: DomainSettings): boolean {
-    if (a.enabled !== b.enabled) return false;
-    if (a.hiddenElements.length !== b.hiddenElements.length) return false;
+    const isEqual =
+      a.enabled === b.enabled &&
+      a.hiddenElements.length === b.hiddenElements.length &&
+      a.hiddenElements.every((elementA, index) => {
+        const elementB = b.hiddenElements[index];
+        return (
+          elementA.domPath === elementB.domPath &&
+          elementA.tagName === elementB.tagName &&
+          JSON.stringify(elementA.classNames) === JSON.stringify(elementB.classNames)
+        );
+      });
 
-    return a.hiddenElements.every((elementA, index) => {
-      const elementB = b.hiddenElements[index];
-      return (
-        elementA.domPath === elementB.domPath &&
-        elementA.tagName === elementB.tagName &&
-        JSON.stringify(elementA.classNames) === JSON.stringify(elementB.classNames)
-      );
-    });
+    if (!isEqual) {
+      logger.debug('Settings comparison failed:', {
+        settingsA: a,
+        settingsB: b,
+      });
+    }
+
+    return isEqual;
   }
 }
