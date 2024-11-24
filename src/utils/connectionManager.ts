@@ -25,13 +25,13 @@ export class ConnectionManager {
    */
   connect(name: string): chrome.runtime.Port {
     try {
-      console.log(`Connecting as ${name}...`);
+      console.log(`[connectionManager] Connecting as ${name}...`);
       this.connectionStatus = 'connecting';
 
       this.disconnectExistingPort();
       return this.establishNewConnection(name);
     } catch (error) {
-      console.error('Connection error:', error);
+      console.error('[connectionManager] Connection error:', error);
       this.connectionStatus = 'disconnected';
       throw new Error(`Failed to establish connection as ${name}`);
     }
@@ -43,13 +43,13 @@ export class ConnectionManager {
    * @param message 送信メッセージ
    */
   async sendMessage(target: string, message: Message): Promise<void> {
-    console.log(`Sending message to ${target}:`, message);
+    console.log(`[connectionManager] Sending message to ${target}:`, message);
 
     try {
       await this.ensureConnection(target);
       await this.postMessage(target, message);
     } catch (error) {
-      console.error('Message sending failed:', error);
+      console.error('[connectionManager] Message sending failed:', error);
       throw error;
     }
   }
@@ -70,7 +70,7 @@ export class ConnectionManager {
 
   private disconnectExistingPort(): void {
     if (this.port) {
-      console.log('Disconnecting existing connection');
+      console.log('[connectionManager] Disconnecting existing connection');
       try {
         this.port.disconnect();
       } catch (error) {
@@ -85,14 +85,14 @@ export class ConnectionManager {
     const newPort = chrome.runtime.connect({ name });
 
     newPort.onDisconnect.addListener(() => {
-      console.log(`Disconnected: ${name}`);
+      console.log(`[connectionManager] Disconnected: ${name}`);
       this.handleDisconnection();
     });
 
     this.port = newPort;
     this.connectionStatus = 'connected';
     this.reconnectAttempts = 0;
-    console.log(`Connected as ${name}`);
+    console.log(`[connectionManager] Connected as ${name}`);
 
     return newPort;
   }
@@ -103,7 +103,7 @@ export class ConnectionManager {
         throw new Error('Max reconnection attempts reached');
       }
 
-      console.log('No connection available. Attempting to reconnect...');
+      console.log('[connectionManager] No connection available. Attempting to reconnect...');
       this.reconnectAttempts++;
       this.port = this.connect(target);
 
@@ -125,9 +125,9 @@ export class ConnectionManager {
       };
 
       this.port.postMessage(enrichedMessage);
-      console.log('Message sent successfully');
+      console.log('[connectionManager] Message sent successfully');
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error('[connectionManager] Failed to send message:', error);
       this.handleDisconnection();
       throw error;
     }
@@ -137,6 +137,6 @@ export class ConnectionManager {
     this.port = null;
     this.connectionStatus = 'disconnected';
     // 接続状態の変更をログに記録
-    console.log('Connection status changed to:', this.connectionStatus);
+    console.log('[connectionManager] Connection status changed to:', this.connectionStatus);
   }
 }
