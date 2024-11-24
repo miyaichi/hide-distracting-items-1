@@ -121,12 +121,15 @@ class BackgroundService {
     // Initialize ContentScript
     if (this.activeTabId) {
       try {
-        await chrome.tabs.sendMessage(this.activeTabId, {
-          type: 'INITIALIZE_CONTENT',
-          payload: {
-            domain: domainInfo.domain,
-          },
-        });
+        const connctionScriptConnection = this.connections.get('content-script');
+        if (connctionScriptConnection) {
+          this.sendMessage(connctionScriptConnection.port, {
+            type: 'INITIALIZE_CONTENT',
+            payload: {
+              domain: domainInfo.domain,
+            },
+          });
+        }
       } catch (error) {
         // Ignore errors since the ContentScript may not be loaded yet
         console.log('[background] ContentScript not ready yet');
@@ -203,6 +206,11 @@ class BackgroundService {
       case 'DOMAIN_INFO':
         this.handleDomainInfo(message);
         break;
+      case 'CONTENT_ACTION':
+        // Convert { action: 'action', ...rest } to { type: 'action', ...rest }
+        const { action, ...rest } = message.payload;
+        this.forwardMessage(sourceName, { type: action, ...rest });
+        break;
       default:
         this.forwardMessage(sourceName, message);
         break;
@@ -223,7 +231,7 @@ class BackgroundService {
   }
 
   private forwardMessage(sourceName: string, message: Message): void {
-    console.log('[background] Forwarding message from:', sourceName);
+    console.log('[background] Forwarding message from:', sourceName, message);
 
     for (const [name, connection] of this.connections.entries()) {
       if (name !== sourceName) {

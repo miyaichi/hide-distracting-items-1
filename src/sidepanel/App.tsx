@@ -32,11 +32,10 @@ export const App: React.FC = () => {
   const handleDomainChange = useCallback(
     async (newDomain: string) => {
       console.log('Domain changed to:', newDomain);
-      if (newDomain !== currentDomain) {
-        setCurrentDomain(newDomain);
-        setIsSelectionMode(false);
-        await loadDomainSettings(newDomain);
-      }
+      setCurrentDomain(newDomain);
+      setIsSelectionMode(false);
+      handleToggleSelectionMode(false);
+      await loadDomainSettings(newDomain);
     },
     [currentDomain, loadDomainSettings]
   );
@@ -84,9 +83,9 @@ export const App: React.FC = () => {
     const newElements = hiddenElements.filter((e) => e.domPath !== element.domPath);
     setHiddenElements(newElements);
 
-    connection.sendMessage('content-script', {
-      type: 'SHOW_ELEMENT',
-      identifier: element,
+    connection.sendMessage('background', {
+      type: 'CONTENT_ACTION',
+      payload: { action: 'SHOW_ELEMENT', identifier: element },
     });
 
     await StorageManager.saveDomainSettings(currentDomain, {
@@ -103,9 +102,9 @@ export const App: React.FC = () => {
     }
 
     setIsSelectionMode(enabled);
-    connection.sendMessage('content-script', {
-      type: 'TOGGLE_SELECTION_MODE',
-      enabled,
+    connection.sendMessage('background', {
+      type: 'CONTENT_ACTION',
+      payload: { action: 'TOGGLE_SELECTION_MODE', enabled },
     });
   };
 
@@ -116,8 +115,9 @@ export const App: React.FC = () => {
     }
 
     setHiddenElements([]);
-    connection.sendMessage('content-script', {
-      type: 'CLEAR_ALL',
+    connection.sendMessage('background', {
+      type: 'CONTENT_ACTION',
+      payload: { action: 'CLEAR_ALL' },
     });
 
     await StorageManager.saveDomainSettings(currentDomain, {
