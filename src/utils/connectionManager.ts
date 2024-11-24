@@ -19,9 +19,9 @@ export class ConnectionManager {
   private reconnectAttempts = 0;
 
   /**
-   * 新しい接続を確立する
-   * @param name 接続名
-   * @returns 確立された接続ポート
+   * Established a new connection
+   * @param name Connection name
+   * @returns Port object
    */
   connect(name: string): chrome.runtime.Port {
     try {
@@ -38,9 +38,9 @@ export class ConnectionManager {
   }
 
   /**
-   * メッセージを送信する
-   * @param target 送信先
-   * @param message 送信メッセージ
+   * Send a message
+   * @param target Target connection name
+   * @param message Message object
    */
   async sendMessage(target: string, message: Message): Promise<void> {
     logger.debug(`Sending message to ${target}:`, message);
@@ -55,14 +55,15 @@ export class ConnectionManager {
   }
 
   /**
-   * 現在の接続状態を取得
+   * Get the current connection status
+   * @returns Connection status
    */
   getConnectionStatus(): ConnectionStatus {
     return this.connectionStatus;
   }
 
   /**
-   * 接続を強制的に切断
+   * Disconnect the connection forcibly
    */
   disconnect(): void {
     this.disconnectExistingPort();
@@ -116,7 +117,7 @@ export class ConnectionManager {
       this.reconnectAttempts++;
       this.port = this.connect(target);
 
-      // 接続が確立されるまで短い待機
+      // Wait for a short time until the connection is established
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
