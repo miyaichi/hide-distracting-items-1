@@ -104,16 +104,16 @@ export class ConnectionManager {
         const error = 'Max reconnection attempts reached';
         logger.error(error, {
           maxAttempts: this.maxReconnectAttempts,
-          currentAttempts: this.reconnectAttempts
+          currentAttempts: this.reconnectAttempts,
         });
         throw new Error(error);
       }
 
       logger.warn('No connection available. Attempting to reconnect...', {
         attempt: this.reconnectAttempts + 1,
-        maxAttempts: this.maxReconnectAttempts
+        maxAttempts: this.maxReconnectAttempts,
       });
-      
+
       this.reconnectAttempts++;
       this.port = this.connect(target);
 
@@ -139,7 +139,7 @@ export class ConnectionManager {
       this.port.postMessage(enrichedMessage);
       logger.debug('Message sent successfully', {
         target,
-        messageType: message.type
+        messageType: message.type,
       });
     } catch (error) {
       logger.error('Failed to send message:', error);
