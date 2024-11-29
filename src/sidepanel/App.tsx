@@ -41,15 +41,15 @@ export const App: React.FC = () => {
       const newElements = [...prevElements, element];
       logger.debug('Current hidden elements:', prevElements);
       logger.debug('New hidden elements:', newElements);
-      
+
       // Storage update moved inside the callback to ensure we're using the latest state
       StorageManager.saveDomainSettings(domain, {
         hiddenElements: newElements,
         enabled: true,
-      }).catch(error => {
+      }).catch((error) => {
         logger.error('Error saving domain settings:', error);
       });
-      
+
       return newElements;
     });
   }, []);
@@ -69,45 +69,51 @@ export const App: React.FC = () => {
     [handleDomainChange, handleElementSelected]
   );
 
-  const handleRemoveElement = useCallback(async (element: ElementIdentifier) => {
-    if (!currentDomain) return;
+  const handleRemoveElement = useCallback(
+    async (element: ElementIdentifier) => {
+      if (!currentDomain) return;
 
-    logger.log('Removing element:', element);
-    setHiddenElements((prevElements) => {
-      const newElements = prevElements.filter((e) => e.domPath !== element.domPath);
-      
+      logger.log('Removing element:', element);
+      setHiddenElements((prevElements) => {
+        const newElements = prevElements.filter((e) => e.domPath !== element.domPath);
+
+        connection.sendMessage<ContentActionMessage>('background', {
+          type: 'CONTENT_ACTION',
+          action: {
+            action: 'SHOW_ELEMENT',
+            identifier: element,
+          },
+        });
+
+        StorageManager.saveDomainSettings(currentDomain, {
+          hiddenElements: newElements,
+          enabled: true,
+        }).catch((error) => {
+          logger.error('Error saving domain settings:', error);
+        });
+
+        return newElements;
+      });
+    },
+    [currentDomain, connection]
+  );
+
+  const handleToggleSelectionMode = useCallback(
+    (enabled: boolean) => {
+      if (!currentDomain) return;
+
+      logger.log('Selection mode toggled:', enabled);
+      setIsSelectionMode(enabled);
       connection.sendMessage<ContentActionMessage>('background', {
         type: 'CONTENT_ACTION',
         action: {
-          action: 'SHOW_ELEMENT',
-          identifier: element,
+          action: 'TOGGLE_SELECTION_MODE',
+          enabled,
         },
       });
-
-      StorageManager.saveDomainSettings(currentDomain, {
-        hiddenElements: newElements,
-        enabled: true,
-      }).catch(error => {
-        logger.error('Error saving domain settings:', error);
-      });
-
-      return newElements;
-    });
-  }, [currentDomain, connection]);
-
-  const handleToggleSelectionMode = useCallback((enabled: boolean) => {
-    if (!currentDomain) return;
-
-    logger.log('Selection mode toggled:', enabled);
-    setIsSelectionMode(enabled);
-    connection.sendMessage<ContentActionMessage>('background', {
-      type: 'CONTENT_ACTION',
-      action: {
-        action: 'TOGGLE_SELECTION_MODE',
-        enabled,
-      },
-    });
-  }, [currentDomain, connection]);
+    },
+    [currentDomain, connection]
+  );
 
   const handleClearAll = useCallback(async () => {
     if (!currentDomain) return;
