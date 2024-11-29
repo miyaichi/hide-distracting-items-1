@@ -1,5 +1,3 @@
-// src/lib/logger.ts
-
 interface LogLevel {
   error: number;
   warn: number;

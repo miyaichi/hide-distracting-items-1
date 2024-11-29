@@ -1,4 +1,3 @@
-// src/utils/elementFinder.ts
 import { ElementIdentifier } from '../types/types';
 
 export class ElementFinder {

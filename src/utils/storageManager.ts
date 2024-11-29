@@ -21,7 +21,9 @@ export class StorageManager {
   };
 
   /**
-   * 指定したドメインの設定を取得
+   * Load settings for a specific domain
+   * @param domain Domain to load settings for
+   * @returns Domain settings
    */
   static async getDomainSettings(domain: string): Promise<DomainSettings> {
     if (!this.isValidDomain(domain)) {
@@ -50,7 +52,10 @@ export class StorageManager {
   }
 
   /**
-   * ドメインの設定を保存
+   * Save settings for a specific domain
+   * @param domain Domain to save settings for
+   * @param settings Settings to save
+   * @returns Operation result
    */
   static async saveDomainSettings(
     domain: string,
@@ -79,7 +84,7 @@ export class StorageManager {
 
       await chrome.storage.sync.set({ [domain]: settings });
 
-      // 保存の確認
+      // Verify saved settings
       const saved = await this.getDomainSettings(domain);
       logger.debug('Verified saved settings:', saved);
 
@@ -103,7 +108,8 @@ export class StorageManager {
   }
 
   /**
-   * すべての保存された設定を取得
+   * Get all stored domains and their settings
+   * @returns All stored domains and settings
    */
   static async getAllStoredDomains(): Promise<{ [domain: string]: DomainSettings }> {
     try {
@@ -129,7 +135,7 @@ export class StorageManager {
   }
 
   /**
-   * すべての設定をクリア
+   * Clear all stored settings
    */
   static async clearAllSettings(): Promise<StorageOperation> {
     try {
@@ -146,7 +152,8 @@ export class StorageManager {
   }
 
   /**
-   * 特定のドメインの設定を削除
+   * Delete settings for a specific domain
+   * @param domain Domain to remove settings for
    */
   static async removeDomainSettings(domain: string): Promise<StorageOperation> {
     try {
@@ -163,7 +170,7 @@ export class StorageManager {
   }
 
   /**
-   * ストレージの使用状況を取得
+   * Get the current storage usage
    */
   static async getStorageUsage(): Promise<{ bytesInUse: number; quotaBytes: number }> {
     try {
