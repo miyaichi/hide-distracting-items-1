@@ -116,7 +116,7 @@ export class StorageManager {
       const all = await chrome.storage.sync.get(null);
       logger.debug('Retrieved all stored settings:', all);
 
-      // 不正な設定を除外
+      // Remove invalid settings
       const validSettings: { [domain: string]: DomainSettings } = {};
       for (const [domain, settings] of Object.entries(all)) {
         if (this.isValidDomain(domain) && this.validateSettings(settings).isValid) {

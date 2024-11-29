@@ -1,13 +1,16 @@
-// src/sidepanel/components/ElementTree.tsx
+// src/sidepanel/components/HiddenElementList.tsx
 import React from 'react';
 import { ElementIdentifier } from '../../types/types';
 
-interface ElementTreeProps {
+interface HiddenElementListProps {
   elements: ElementIdentifier[];
   onRemoveElement: (element: ElementIdentifier) => void;
 }
 
-export const ElementTree: React.FC<ElementTreeProps> = ({ elements, onRemoveElement }) => {
+export const HiddenElementList: React.FC<HiddenElementListProps> = ({
+  elements,
+  onRemoveElement,
+}) => {
   const formatElementInfo = (element: ElementIdentifier) => {
     const parts = [];
     parts.push(element.tagName);

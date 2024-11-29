@@ -3,6 +3,7 @@ import {
   ContentActionMessage,
   DomainInfoMessage,
   ElementActionMessage,
+  ElementSelectedMessage,
   Message,
 } from '../types/types';
 import { createContentScriptName } from '../utils/connectionTypes';
@@ -199,6 +200,9 @@ class BackgroundService {
       case 'CONTENT_ACTION':
         this.handleContentAction(sourceName, message as ContentActionMessage);
         break;
+      case 'ELEMENT_SELECTED':
+        this.handleElementSelected(message as ElementSelectedMessage);
+        break;
       default:
         this.forwardMessage(sourceName, message);
     }
@@ -208,8 +212,13 @@ class BackgroundService {
     this.currentDomain = message.domain;
     const sidepanelConnection = this.connections.get('sidepanel');
     if (sidepanelConnection) {
-      logger.log('Forwarding domain info:', message.domain);
-      this.sendMessage<DomainInfoMessage>(sidepanelConnection.port, message);
+      logger.debug('Found sidepanel connection, forwarding domain info:', message);
+      this.sendMessage<DomainInfoMessage>(sidepanelConnection.port, {
+        ...message,
+        target: 'sidepanel',
+      });
+    } else {
+      logger.warn('No sidepanel connection found when handling DOMAIN_INFO');
     }
   }
 
@@ -250,6 +259,20 @@ class BackgroundService {
           break;
       }
     });
+  }
+
+  private handleElementSelected(message: ElementSelectedMessage): void {
+    this.currentDomain = message.domain;
+    const sidepanelConnection = this.connections.get('sidepanel');
+    if (sidepanelConnection) {
+      logger.debug('Found sidepanel connection, forwarding message:', message);
+      this.sendMessage<ElementSelectedMessage>(sidepanelConnection.port, {
+        ...message,
+        target: 'sidepanel',
+      });
+    } else {
+      logger.warn('No sidepanel connection found when handling ELEMENT_SELECTED');
+    }
   }
 
   private forwardMessage(sourceName: ConnectionName, message: Message): void {

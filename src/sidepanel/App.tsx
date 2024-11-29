@@ -4,7 +4,7 @@ import { ConnectionManager } from '../utils/connectionManager';
 import { Logger } from '../utils/logger';
 import { StorageManager } from '../utils/storageManager';
 import { Controls } from './components/Controls';
-import { ElementTree } from './components/ElementTree';
+import { HiddenElementList } from './components/HiddenElementList';
 
 const logger = new Logger('Sidepanel');
 
@@ -35,6 +35,25 @@ export const App: React.FC = () => {
     [loadDomainSettings]
   );
 
+  const handleElementSelected = useCallback(async (element: ElementIdentifier, domain: string) => {
+    logger.log('Element selected for domain:', domain);
+    setHiddenElements((prevElements) => {
+      const newElements = [...prevElements, element];
+      logger.debug('Current hidden elements:', prevElements);
+      logger.debug('New hidden elements:', newElements);
+      
+      // Storage update moved inside the callback to ensure we're using the latest state
+      StorageManager.saveDomainSettings(domain, {
+        hiddenElements: newElements,
+        enabled: true,
+      }).catch(error => {
+        logger.error('Error saving domain settings:', error);
+      });
+      
+      return newElements;
+    });
+  }, []);
+
   const handleMessage = useCallback(
     async (message: Message) => {
       logger.debug('Received message:', message);
@@ -47,41 +66,36 @@ export const App: React.FC = () => {
           break;
       }
     },
-    [handleDomainChange]
+    [handleDomainChange, handleElementSelected]
   );
 
-  const handleElementSelected = async (element: ElementIdentifier, domain: string) => {
-    logger.log('Element selected for domain:', domain);
-    const newElements = [...hiddenElements, element];
-    setHiddenElements(newElements);
-    await StorageManager.saveDomainSettings(domain, {
-      hiddenElements: newElements,
-      enabled: true,
-    });
-  };
-
-  const handleRemoveElement = async (element: ElementIdentifier) => {
+  const handleRemoveElement = useCallback(async (element: ElementIdentifier) => {
     if (!currentDomain) return;
 
     logger.log('Removing element:', element);
-    const newElements = hiddenElements.filter((e) => e.domPath !== element.domPath);
-    setHiddenElements(newElements);
+    setHiddenElements((prevElements) => {
+      const newElements = prevElements.filter((e) => e.domPath !== element.domPath);
+      
+      connection.sendMessage<ContentActionMessage>('background', {
+        type: 'CONTENT_ACTION',
+        action: {
+          action: 'SHOW_ELEMENT',
+          identifier: element,
+        },
+      });
 
-    connection.sendMessage<ContentActionMessage>('background', {
-      type: 'CONTENT_ACTION',
-      action: {
-        action: 'SHOW_ELEMENT',
-        identifier: element,
-      },
+      StorageManager.saveDomainSettings(currentDomain, {
+        hiddenElements: newElements,
+        enabled: true,
+      }).catch(error => {
+        logger.error('Error saving domain settings:', error);
+      });
+
+      return newElements;
     });
+  }, [currentDomain, connection]);
 
-    await StorageManager.saveDomainSettings(currentDomain, {
-      hiddenElements: newElements,
-      enabled: true,
-    });
-  };
-
-  const handleToggleSelectionMode = (enabled: boolean) => {
+  const handleToggleSelectionMode = useCallback((enabled: boolean) => {
     if (!currentDomain) return;
 
     logger.log('Selection mode toggled:', enabled);
@@ -93,9 +107,9 @@ export const App: React.FC = () => {
         enabled,
       },
     });
-  };
+  }, [currentDomain, connection]);
 
-  const handleClearAll = async () => {
+  const handleClearAll = useCallback(async () => {
     if (!currentDomain) return;
 
     logger.log('Clearing all elements');
@@ -109,7 +123,7 @@ export const App: React.FC = () => {
       hiddenElements: [],
       enabled: true,
     });
-  };
+  }, [currentDomain, connection]);
 
   useEffect(() => {
     logger.log('Side panel mounted');
@@ -138,7 +152,7 @@ export const App: React.FC = () => {
       />
 
       <div className="side-panel-content custom-scrollbar">
-        <ElementTree elements={hiddenElements} onRemoveElement={handleRemoveElement} />
+        <HiddenElementList elements={hiddenElements} onRemoveElement={handleRemoveElement} />
       </div>
     </div>
   );
