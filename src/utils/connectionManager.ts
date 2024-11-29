@@ -1,16 +1,7 @@
+import { ConnectionName, ConnectionStatus, Message } from '../types/types';
 import { Logger } from './logger';
 
 const logger = new Logger('ConnectionManager');
-
-interface Message {
-  type: string;
-  target?: string;
-  enabled?: boolean;
-  identifier?: any;
-  payload?: any;
-}
-
-type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
 export class ConnectionManager {
   private port: chrome.runtime.Port | null = null;
@@ -23,11 +14,10 @@ export class ConnectionManager {
    * @param name Connection name
    * @returns Port object
    */
-  connect(name: string): chrome.runtime.Port {
+  connect(name: ConnectionName): chrome.runtime.Port {
     try {
       logger.log(`Connecting as ${name}...`);
       this.connectionStatus = 'connecting';
-
       this.disconnectExistingPort();
       return this.establishNewConnection(name);
     } catch (error) {
@@ -38,16 +28,19 @@ export class ConnectionManager {
   }
 
   /**
-   * Send a message
+   * Send a message to the target connection
    * @param target Target connection name
    * @param message Message object
    */
-  async sendMessage(target: string, message: Message): Promise<void> {
+  async sendMessage<T extends Message>(
+    target: T['target'],
+    message: Omit<T, 'target' | 'timestamp'>
+  ): Promise<void> {
     logger.debug(`Sending message to ${target}:`, message);
 
     try {
       await this.ensureConnection(target);
-      await this.postMessage(target, message);
+      await this.postMessage(target, message as T);
     } catch (error) {
       logger.error('Message sending failed:', error);
       throw error;
@@ -63,7 +56,7 @@ export class ConnectionManager {
   }
 
   /**
-   * Disconnect the connection forcibly
+   * Disconnect from the current connection
    */
   disconnect(): void {
     this.disconnectExistingPort();
@@ -82,7 +75,7 @@ export class ConnectionManager {
     }
   }
 
-  private establishNewConnection(name: string): chrome.runtime.Port {
+  private establishNewConnection(name: ConnectionName): chrome.runtime.Port {
     const newPort = chrome.runtime.connect({ name });
 
     newPort.onDisconnect.addListener(() => {
@@ -98,42 +91,53 @@ export class ConnectionManager {
     return newPort;
   }
 
-  private async ensureConnection(target: string): Promise<void> {
-    if (!this.port) {
-      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-        const error = 'Max reconnection attempts reached';
-        logger.error(error, {
-          maxAttempts: this.maxReconnectAttempts,
-          currentAttempts: this.reconnectAttempts,
-        });
-        throw new Error(error);
-      }
+  private async ensureConnection(target: ConnectionName): Promise<void> {
+    const baseDelay = 100; // Base delay for exponential backoff (Milliseconds)
+    const maxDelay = 5000; // Maximum delay for exponential backoff (Milliseconds)
+
+    while (!this.port && this.reconnectAttempts < this.maxReconnectAttempts) {
+      // Exponential backoff
+      // If you not want to use exponential backoff, you can use the following code:
+      // const delay = baseDelay;
+      const delay = Math.min(baseDelay * Math.pow(2, this.reconnectAttempts), maxDelay);
 
       logger.warn('No connection available. Attempting to reconnect...', {
         attempt: this.reconnectAttempts + 1,
-        maxAttempts: this.maxReconnectAttempts,
+        delay,
       });
 
       this.reconnectAttempts++;
-      this.port = this.connect(target);
+      await this.sleep(delay);
 
-      // Wait for a short time until the connection is established
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      try {
+        this.port = this.connect(target);
+      } catch (error) {
+        logger.error('Reconnection attempt failed:', error);
+      }
+    }
+
+    if (!this.port) {
+      throw new Error('Failed to establish connection after maximum attempts');
     }
   }
 
-  private async postMessage(target: string, message: Message): Promise<void> {
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async postMessage<T extends Message>(
+    target: T['target'],
+    message: Omit<T, 'target' | 'timestamp'>
+  ): Promise<void> {
     if (!this.port) {
-      const error = 'No connection available';
-      logger.error(error);
-      throw new Error(error);
+      throw new Error('No connection available');
     }
 
     try {
       const enrichedMessage = {
+        ...message,
         target,
         timestamp: Date.now(),
-        ...message,
       };
 
       this.port.postMessage(enrichedMessage);

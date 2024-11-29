@@ -1,4 +1,11 @@
-import { DomainSettings, ElementIdentifier } from '../types/types';
+import {
+  ContentActionMessage,
+  DomainInfoMessage,
+  DomainSettings,
+  ElementIdentifier,
+  ElementSelectedMessage,
+  Message,
+} from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
 import { ElementFinder } from '../utils/elementFinder';
 import { Logger } from '../utils/logger';
@@ -46,16 +53,11 @@ class ContentScript {
   }
 
   private notifyDomain() {
-    logger.debug('Notifying domain info:', {
+    logger.debug('Notifying domain info:', this.currentDomain);
+    this.connection.sendMessage<DomainInfoMessage>('background', {
+      type: 'DOMAIN_INFO',
       domain: this.currentDomain,
       url: window.location.href,
-    });
-    this.connection.sendMessage('background', {
-      type: 'DOMAIN_INFO',
-      payload: {
-        domain: this.currentDomain,
-        url: window.location.href,
-      },
     });
   }
 
@@ -96,14 +98,14 @@ class ContentScript {
   private setupMessageListeners() {
     this.disconnectExistingConnection();
     const port = this.connection.connect('content-script');
-    logger.debug('Connected to background');
+    logger.debug(`Connected to background for port: ${port.name}`);
 
-    port.onMessage.addListener(async (message) => {
-      logger.debug('Received message:', message);
+    port.onMessage.addListener(async (message: Message) => {
+      logger.debug(`Processing message type: ${message.type}`);
 
       switch (message.type) {
         case 'INITIALIZE_CONTENT':
-          await this.handleInitialization(message.payload.domain);
+          await this.handleInitialization(message.domain);
           break;
         case 'TOGGLE_SELECTION_MODE':
           this.toggleSelectionMode(message.enabled);
@@ -126,8 +128,6 @@ class ContentScript {
     if (this.currentDomain !== domain) {
       this.currentDomain = domain;
       await this.loadSavedSettings();
-    } else {
-      logger.debug('Domain unchanged, skipping initialization');
     }
   }
 
@@ -147,9 +147,9 @@ class ContentScript {
   }
 
   private NotifyApplyRules(rules: number, applyed: number) {
-    this.connection.sendMessage('background', {
+    this.connection.sendMessage<ContentActionMessage>('background', {
       type: 'CONTENT_ACTION',
-      payload: {
+      action: {
         action: 'APPLY_RULES',
         rules,
         applyed,
@@ -212,12 +212,11 @@ class ContentScript {
       this.disableSelectionMode();
     }
 
-    logger.debug('Selection mode state:', {
-      isSelectionMode: this.isSelectionMode,
-      hasSelectionModeClass: document.documentElement.classList.contains('hde-selection-mode'),
-      cursor: window.getComputedStyle(document.body).cursor,
-      htmlCursor: window.getComputedStyle(document.documentElement).cursor,
-    });
+    if (enabled) {
+      logger.debug('Selection mode enabled');
+    } else {
+      logger.debug('Selection mode disabled');
+    }
   }
 
   private cleanupSelectionMode() {
@@ -292,14 +291,12 @@ class ContentScript {
 
     const target = e.target as Element;
     const identifier = ElementFinder.getElementIdentifier(target);
-    logger.log('Element selected:', identifier);
 
-    this.connection.sendMessage('background', {
+    logger.log('Element selected:', identifier);
+    this.connection.sendMessage<ElementSelectedMessage>('background', {
       type: 'ELEMENT_SELECTED',
-      payload: {
-        identifier,
-        domain: this.currentDomain,
-      },
+      domain: this.currentDomain,
+      identifier,
     });
 
     target.classList.add('hde-hidden');

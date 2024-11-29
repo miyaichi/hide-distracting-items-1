@@ -1,14 +1,15 @@
-// src/background/background.ts
+import {
+  ConnectionName,
+  ContentActionMessage,
+  DomainInfoMessage,
+  ElementActionMessage,
+  Message,
+} from '../types/types';
 import { Logger } from '../utils/logger';
 
 interface Connection {
-  name: string;
+  name: ConnectionName;
   port: chrome.runtime.Port;
-}
-
-interface Message {
-  type: string;
-  payload: any;
 }
 
 interface DomainInfo {
@@ -20,7 +21,7 @@ const logger = new Logger('Background');
 
 class BackgroundService {
   private static instance: BackgroundService;
-  private readonly connections: Map<string, Connection>;
+  private readonly connections: Map<ConnectionName, Connection>;
   private currentDomain: string | null;
   private activeTabId: number | null;
 
@@ -60,10 +61,10 @@ class BackgroundService {
   }
 
   private setupTabListeners(): void {
-    chrome.tabs.onActivated.addListener(async (activeInfo) => {
-      logger.debug('Tab activated:', activeInfo.tabId);
-      this.activeTabId = activeInfo.tabId;
-      await this.handleTabChange(activeInfo.tabId);
+    chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+      logger.debug('Tab activated:', tabId);
+      this.activeTabId = tabId;
+      await this.handleTabChange(tabId);
     });
 
     chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
@@ -78,27 +79,13 @@ class BackgroundService {
     chrome.windows.onFocusChanged.addListener(async (windowId) => {
       if (windowId !== chrome.windows.WINDOW_ID_NONE) {
         logger.debug('Window focus changed:', windowId);
-        const tabs = await chrome.tabs.query({ active: true, windowId });
-        if (tabs[0]) {
-          this.activeTabId = tabs[0].id ?? null;
-          if (this.activeTabId) {
-            await this.handleTabChange(this.activeTabId);
-          }
+        const [tab] = await chrome.tabs.query({ active: true, windowId });
+        if (tab?.id) {
+          this.activeTabId = tab.id;
+          await this.handleTabChange(tab.id);
         }
       }
     });
-  }
-
-  private async initializeActiveTab(): Promise<void> {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id) {
-        this.activeTabId = tab.id;
-        await this.handleTabChange(tab.id);
-      }
-    } catch (error) {
-      logger.error('Failed to initialize active tab:', error);
-    }
   }
 
   private async handleTabChange(tabId: number): Promise<void> {
@@ -106,11 +93,7 @@ class BackgroundService {
       const tab = await chrome.tabs.get(tabId);
       if (tab.url) {
         const url = new URL(tab.url);
-        const domainInfo: DomainInfo = {
-          domain: url.hostname,
-          url: tab.url,
-        };
-        await this.updateDomainInfo(domainInfo);
+        await this.updateDomainInfo({ domain: url.hostname, url: tab.url });
       }
     } catch (error) {
       logger.error('Failed to handle tab change:', error);
@@ -123,28 +106,24 @@ class BackgroundService {
 
     // Initialize ContentScript
     if (this.activeTabId) {
-      try {
-        const connctionScriptConnection = this.connections.get('content-script');
-        if (connctionScriptConnection) {
-          this.sendMessage(connctionScriptConnection.port, {
-            type: 'INITIALIZE_CONTENT',
-            payload: {
-              domain: domainInfo.domain,
-            },
-          });
-        }
-      } catch (error) {
-        // Ignore errors since the ContentScript may not be loaded yet
-        logger.warn('ContentScript not ready yet');
+      const contentScriptConnection = this.connections.get('content-script');
+      if (contentScriptConnection) {
+        this.sendMessage<Message>(contentScriptConnection.port, {
+          type: 'INITIALIZE_CONTENT',
+          target: 'content-script',
+          domain: domainInfo.domain,
+        });
       }
     }
 
     // Notify SidePanel
     const sidepanelConnection = this.connections.get('sidepanel');
     if (sidepanelConnection) {
-      this.sendMessage(sidepanelConnection.port, {
+      this.sendMessage<DomainInfoMessage>(sidepanelConnection.port, {
         type: 'DOMAIN_INFO',
-        payload: domainInfo,
+        target: 'sidepanel',
+        domain: domainInfo.domain,
+        url: domainInfo.url,
       });
     }
   }
@@ -160,90 +139,120 @@ class BackgroundService {
   // Connection handling
   private handlePortConnection(port: chrome.runtime.Port): void {
     logger.debug('New connection:', port.name);
-    this.updateConnection(port);
+    const name = port.name as ConnectionName;
+    this.updateConnection(name, port);
     this.setupMessageListener(port);
-    this.setupDisconnectListener(port);
-    this.initializeConnection(port);
+    this.setupDisconnectListener(name, port);
+    this.initializeConnection(name, port);
   }
 
-  private updateConnection(port: chrome.runtime.Port): void {
-    const existingConnection = this.connections.get(port.name);
+  private updateConnection(name: ConnectionName, port: chrome.runtime.Port): void {
+    const existingConnection = this.connections.get(name);
     if (existingConnection) {
-      logger.debug('Updating existing connection:', port.name);
+      logger.debug('Updating existing connection:', name);
       existingConnection.port.disconnect();
     }
-
-    this.connections.set(port.name, {
-      name: port.name,
-      port: port,
-    });
+    this.connections.set(name, { name, port });
   }
 
   private setupMessageListener(port: chrome.runtime.Port): void {
     port.onMessage.addListener((message: Message) => {
-      logger.debug('Received message:', message);
-      this.handleMessage(port.name, message);
+      logger.debug(`Processing message type: ${message.type}`);
+
+      this.handleMessage(port.name as ConnectionName, message);
     });
   }
 
-  private setupDisconnectListener(port: chrome.runtime.Port): void {
+  private setupDisconnectListener(name: ConnectionName, port: chrome.runtime.Port): void {
     port.onDisconnect.addListener(() => {
-      logger.log('Disconnected:', port.name);
-      this.connections.delete(port.name);
+      logger.log('Disconnected:', name);
+      this.connections.delete(name);
     });
   }
 
-  private initializeConnection(port: chrome.runtime.Port): void {
-    if (port.name === 'sidepanel' && this.currentDomain) {
+  private initializeConnection(name: ConnectionName, port: chrome.runtime.Port): void {
+    if (name === 'sidepanel' && this.currentDomain) {
       logger.debug('Initializing sidepanel with domain:', this.currentDomain);
-      this.sendMessage(port, {
+      this.sendMessage<DomainInfoMessage>(port, {
         type: 'DOMAIN_INFO',
-        payload: { domain: this.currentDomain },
+        target: 'sidepanel',
+        domain: this.currentDomain,
+        url: '',
       });
     }
   }
 
   // Message handling
-  private handleMessage(sourceName: string, message: Message): void {
+  private handleMessage(sourceName: ConnectionName, message: Message): void {
     switch (message.type) {
       case 'DOMAIN_INFO':
-        this.handleDomainInfo(message);
+        this.handleDomainInfo(message as DomainInfoMessage);
         break;
       case 'CONTENT_ACTION':
-        // Convert { action: 'action', ...rest } to { type: 'action', ...rest }
-        const { action, ...rest } = message.payload;
-        this.forwardMessage(sourceName, { type: action, ...rest });
+        this.handleContentAction(sourceName, message as ContentActionMessage);
         break;
       default:
         this.forwardMessage(sourceName, message);
-        break;
     }
   }
 
-  private handleDomainInfo(message: Message): void {
-    this.currentDomain = message.payload.domain;
+  private handleDomainInfo(message: DomainInfoMessage): void {
+    this.currentDomain = message.domain;
     const sidepanelConnection = this.connections.get('sidepanel');
-
     if (sidepanelConnection) {
-      logger.log('Forwarding domain info:', message.payload);
-      this.sendMessage(sidepanelConnection.port, {
-        type: 'DOMAIN_INFO',
-        payload: message.payload,
-      });
+      logger.log('Forwarding domain info:', message.domain);
+      this.sendMessage<DomainInfoMessage>(sidepanelConnection.port, message);
     }
   }
 
-  private forwardMessage(sourceName: string, message: Message): void {
-    logger.debug('Forwarding message from:', sourceName, message);
+  private handleContentAction(sourceName: ConnectionName, message: ContentActionMessage): void {
+    const { action } = message;
+    const targetConnections = Array.from(this.connections.entries())
+      .filter(([name]) => name !== sourceName)
+      .map(([, connection]) => connection);
 
-    for (const [name, connection] of this.connections.entries()) {
-      if (name !== sourceName) {
-        this.sendMessage(connection.port, message);
+    targetConnections.forEach((connection) => {
+      switch (action.action) {
+        case 'SHOW_ELEMENT':
+          this.sendMessage<ElementActionMessage>(connection.port, {
+            type: 'SHOW_ELEMENT',
+            target: connection.name,
+            identifier: action.identifier,
+          });
+          break;
+        case 'TOGGLE_SELECTION_MODE':
+          this.sendMessage(connection.port, {
+            type: 'TOGGLE_SELECTION_MODE' as const,
+            target: connection.name,
+            enabled: action.enabled,
+          });
+          break;
+        case 'CLEAR_ALL':
+          this.sendMessage(connection.port, {
+            type: 'CLEAR_ALL' as const,
+            target: connection.name,
+          });
+          break;
+        case 'APPLY_RULES':
+          this.sendMessage(connection.port, {
+            type: 'CONTENT_ACTION',
+            target: connection.name,
+            action: action,
+          });
+          break;
       }
-    }
+    });
   }
 
-  private sendMessage(port: chrome.runtime.Port, message: Message): void {
+  private forwardMessage(sourceName: ConnectionName, message: Message): void {
+    this.connections.forEach((connection, name) => {
+      if (name !== sourceName) {
+        this.sendMessage(connection.port, { ...message, target: name });
+      }
+    });
+  }
+
+  private sendMessage<T extends Message>(port: chrome.runtime.Port, message: T): void {
     try {
       port.postMessage(message);
     } catch (error) {
@@ -251,15 +260,17 @@ class BackgroundService {
     }
   }
 
-  // Public methods
-  public getCurrentDomain(): string | null {
-    return this.currentDomain;
-  }
-
-  public getConnections(): Map<string, Connection> {
-    return new Map(this.connections);
+  private async initializeActiveTab(): Promise<void> {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        this.activeTabId = tab.id;
+        await this.handleTabChange(tab.id);
+      }
+    } catch (error) {
+      logger.error('Failed to initialize active tab:', error);
+    }
   }
 }
 
-const backgroundService = BackgroundService.getInstance();
-export default backgroundService;
+export default BackgroundService.getInstance();

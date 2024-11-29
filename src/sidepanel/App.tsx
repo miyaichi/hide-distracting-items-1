@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { DomainSettings, ElementIdentifier } from '../types/types';
+import { ContentActionMessage, DomainSettings, ElementIdentifier, Message } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
 import { Logger } from '../utils/logger';
 import { StorageManager } from '../utils/storageManager';
@@ -7,14 +7,6 @@ import { Controls } from './components/Controls';
 import { ElementTree } from './components/ElementTree';
 
 const logger = new Logger('Sidepanel');
-
-interface MessagePayload {
-  type: string;
-  payload?: {
-    domain: string;
-    identifier?: ElementIdentifier;
-  };
-}
 
 export const App: React.FC = () => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -40,28 +32,19 @@ export const App: React.FC = () => {
       handleToggleSelectionMode(false);
       await loadDomainSettings(newDomain);
     },
-    [currentDomain, loadDomainSettings]
+    [loadDomainSettings]
   );
 
   const handleMessage = useCallback(
-    async (message: MessagePayload) => {
+    async (message: Message) => {
       logger.debug('Received message:', message);
-
       switch (message.type) {
-        case 'DOMAIN_INFO': {
-          const domain = message.payload?.domain;
-          if (domain) {
-            await handleDomainChange(domain);
-          }
+        case 'DOMAIN_INFO':
+          await handleDomainChange(message.domain);
           break;
-        }
-        case 'ELEMENT_SELECTED': {
-          const { identifier, domain } = message.payload || {};
-          if (identifier && domain) {
-            await handleElementSelected(identifier, domain);
-          }
+        case 'ELEMENT_SELECTED':
+          await handleElementSelected(message.identifier, message.domain);
           break;
-        }
       }
     },
     [handleDomainChange]
@@ -78,18 +61,18 @@ export const App: React.FC = () => {
   };
 
   const handleRemoveElement = async (element: ElementIdentifier) => {
-    if (!currentDomain) {
-      logger.error('No current domain set');
-      return;
-    }
+    if (!currentDomain) return;
 
     logger.log('Removing element:', element);
     const newElements = hiddenElements.filter((e) => e.domPath !== element.domPath);
     setHiddenElements(newElements);
 
-    connection.sendMessage('background', {
+    connection.sendMessage<ContentActionMessage>('background', {
       type: 'CONTENT_ACTION',
-      payload: { action: 'SHOW_ELEMENT', identifier: element },
+      action: {
+        action: 'SHOW_ELEMENT',
+        identifier: element,
+      },
     });
 
     await StorageManager.saveDomainSettings(currentDomain, {
@@ -99,30 +82,27 @@ export const App: React.FC = () => {
   };
 
   const handleToggleSelectionMode = (enabled: boolean) => {
-    if (!currentDomain) {
-      logger.error('Cannot toggle selection mode: No domain set');
-      return;
-    }
+    if (!currentDomain) return;
 
     logger.log('Selection mode toggled:', enabled);
     setIsSelectionMode(enabled);
-    connection.sendMessage('background', {
+    connection.sendMessage<ContentActionMessage>('background', {
       type: 'CONTENT_ACTION',
-      payload: { action: 'TOGGLE_SELECTION_MODE', enabled },
+      action: {
+        action: 'TOGGLE_SELECTION_MODE',
+        enabled,
+      },
     });
   };
 
   const handleClearAll = async () => {
-    if (!currentDomain) {
-      logger.error('Cannot clear elements: No domain set');
-      return;
-    }
+    if (!currentDomain) return;
 
     logger.log('Clearing all elements');
     setHiddenElements([]);
-    connection.sendMessage('background', {
+    connection.sendMessage<ContentActionMessage>('background', {
       type: 'CONTENT_ACTION',
-      payload: { action: 'CLEAR_ALL' },
+      action: { action: 'CLEAR_ALL' },
     });
 
     await StorageManager.saveDomainSettings(currentDomain, {
@@ -135,8 +115,6 @@ export const App: React.FC = () => {
     logger.log('Side panel mounted');
 
     const port = connection.connect('sidepanel');
-    logger.debug('Connected to background');
-
     port.onMessage.addListener(handleMessage);
 
     return () => {
@@ -150,9 +128,7 @@ export const App: React.FC = () => {
     <div className="side-panel-container">
       <div className="side-panel-header">
         <h1 className="text-xl font-bold">Hide Distracting Elements</h1>
-        {currentDomain && (
-          <p className="text-sm text-gray-500 mt-1">Domain: {currentDomain || 'No domain set'}</p>
-        )}
+        {currentDomain && <p className="text-sm text-gray-500 mt-1">Domain: {currentDomain}</p>}
       </div>
 
       <Controls
