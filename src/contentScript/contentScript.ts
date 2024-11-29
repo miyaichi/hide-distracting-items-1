@@ -7,6 +7,7 @@ import {
   Message,
 } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
+import { createContentScriptName } from '../utils/connectionTypes';
 import { ElementFinder } from '../utils/elementFinder';
 import { Logger } from '../utils/logger';
 import { StorageManager } from '../utils/storageManager';
@@ -15,7 +16,7 @@ const logger = new Logger('ContentScript');
 
 class ContentScript {
   private static instance: ContentScript | null = null;
-  private readonly connection: ConnectionManager;
+  private connection: ConnectionManager;
   private isSelectionMode = false;
   private hoveredElement: Element | null = null;
   private currentDomain: string;
@@ -95,10 +96,12 @@ class ContentScript {
     `;
   }
 
-  private setupMessageListeners() {
+  private async setupMessageListeners() {
     this.disconnectExistingConnection();
-    const port = this.connection.connect('content-script');
-    logger.debug(`Connected to background for port: ${port.name}`);
+
+    const tabId = await chrome.runtime.sendMessage({ type: 'GET_TAB_ID' });
+    this.connection = new ConnectionManager();
+    const port = this.connection.connect(createContentScriptName(tabId));
 
     port.onMessage.addListener(async (message: Message) => {
       logger.debug(`Processing message type: ${message.type}`);

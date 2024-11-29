@@ -23,7 +23,7 @@ export interface TabState {
   sidePanelPort: chrome.runtime.Port | null;
 }
 
-export type ConnectionName = 'content-script' | 'sidepanel' | 'background';
+export type ConnectionName = `content-script-${number}` | 'sidepanel' | 'background';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 

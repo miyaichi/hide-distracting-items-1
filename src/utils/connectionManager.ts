@@ -1,4 +1,5 @@
 import { ConnectionName, ConnectionStatus, Message } from '../types/types';
+import { getTabIdFromConnectionName, isContentScriptConnection } from './connectionTypes';
 import { Logger } from './logger';
 
 const logger = new Logger('ConnectionManager');
@@ -153,6 +154,11 @@ export class ConnectionManager {
   }
 
   private handleDisconnection(): void {
+    const name: ConnectionName = this.port?.name as ConnectionName;
+    if (this.port && isContentScriptConnection(name)) {
+      const tabId = getTabIdFromConnectionName(this.port.name as ConnectionName);
+      logger.debug(`Content script disconnected for tab ${tabId}`);
+    }
     this.port = null;
     this.connectionStatus = 'disconnected';
     logger.log('Connection status changed to:', this.connectionStatus);

@@ -5,6 +5,7 @@ import {
   ElementActionMessage,
   Message,
 } from '../types/types';
+import { createContentScriptName } from '../utils/connectionTypes';
 import { Logger } from '../utils/logger';
 
 interface Connection {
@@ -58,6 +59,11 @@ class BackgroundService {
 
   private setupConnectionListener(): void {
     chrome.runtime.onConnect.addListener(this.handlePortConnection.bind(this));
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === 'GET_TAB_ID' && sender.tab?.id) {
+        sendResponse(sender.tab.id);
+      }
+    });
   }
 
   private setupTabListeners(): void {
@@ -106,11 +112,13 @@ class BackgroundService {
 
     // Initialize ContentScript
     if (this.activeTabId) {
-      const contentScriptConnection = this.connections.get('content-script');
+      const activeContentScript: ConnectionName = createContentScriptName(this.activeTabId);
+      const contentScriptConnection = this.connections.get(activeContentScript);
       if (contentScriptConnection) {
+        logger.debug('Initializing content script:', activeContentScript);
         this.sendMessage<Message>(contentScriptConnection.port, {
           type: 'INITIALIZE_CONTENT',
-          target: 'content-script',
+          target: activeContentScript,
           domain: domainInfo.domain,
         });
       }
