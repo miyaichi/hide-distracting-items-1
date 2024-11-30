@@ -4,6 +4,8 @@ export interface ElementIdentifier {
   classNames: string[];
   id?: string;
   textContent?: string;
+  children?: ElementIdentifier[];
+  parentPath?: string;
 }
 
 export interface DomainSettings {
