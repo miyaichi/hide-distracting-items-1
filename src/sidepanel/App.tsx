@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ConnectionName,
-  ContentActionMessage,
   DomainSettings,
   ElementIdentifier,
   Message,
   ShowElementMessage,
+  ToggleSelectionModeMessage,
 } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
 import { createContentScriptName } from '../utils/connectionTypes';
@@ -44,7 +44,14 @@ export const App: React.FC = () => {
   const handleTabActivated = useCallback(async (message: { tabId: number }) => {
     const { tabId } = message;
     logger.debug('Tab activated with ID:', tabId);
+
     setCurrentTabId(tabId);
+    handleToggleSelectionMode(false);
+    const currentContentScriptName = createContentScriptName(tabId);
+    connection.sendMessage<ToggleSelectionModeMessage>(currentContentScriptName, {
+      type: 'TOGGLE_SELECTION_MODE',
+      enabled: false,
+    });
   }, []);
 
   const handleDomainChange = useCallback(
@@ -52,7 +59,7 @@ export const App: React.FC = () => {
       logger.log('Domain changed to:', newDomain);
       setCurrentDomain(newDomain);
       setIsSelectionMode(false);
-      handleToggleSelectionMode(false);
+      //handleToggleSelectionMode(false);
       await loadDomainSettings(newDomain);
     },
     [loadDomainSettings]
@@ -124,10 +131,16 @@ export const App: React.FC = () => {
 
   const handleToggleSelectionMode = useCallback(
     (enabled: boolean) => {
-      if (!currentDomain) return;
+      if (!currentDomain || !currentTabId) return;
 
       logger.log('Selection mode toggled:', enabled);
       setIsSelectionMode(enabled);
+      const currentContentScriptName = createContentScriptName(currentTabId);
+      connection.sendMessage<ToggleSelectionModeMessage>(currentContentScriptName, {
+        type: 'TOGGLE_SELECTION_MODE',
+        enabled,
+      });
+      /*
       connection.sendMessage<ContentActionMessage>('background', {
         type: 'CONTENT_ACTION',
         action: {
@@ -135,6 +148,7 @@ export const App: React.FC = () => {
           enabled,
         },
       });
+*/
     },
     [currentDomain, connection]
   );

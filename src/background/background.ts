@@ -1,10 +1,9 @@
 import {
   ConnectionName,
-  ContentActionMessage,
   DomainInfoMessage,
   ElementSelectedMessage,
   Message,
-  TabActivatedMessage,
+  TabActivatedMessage
 } from '../types/types';
 import { createContentScriptName } from '../utils/connectionTypes';
 import { Logger } from '../utils/logger';
@@ -208,9 +207,6 @@ class BackgroundService {
       case 'DOMAIN_INFO':
         this.handleDomainInfo(message as DomainInfoMessage);
         break;
-      case 'CONTENT_ACTION':
-        this.handleContentAction(sourceName, message as ContentActionMessage);
-        break;
       case 'ELEMENT_SELECTED':
         this.handleElementSelected(message as ElementSelectedMessage);
         break;
@@ -231,25 +227,6 @@ class BackgroundService {
     } else {
       logger.warn('No sidepanel connection found when handling DOMAIN_INFO');
     }
-  }
-
-  private handleContentAction(sourceName: ConnectionName, message: ContentActionMessage): void {
-    const { action } = message;
-    const targetConnections = Array.from(this.connections.entries())
-      .filter(([name]) => name !== sourceName)
-      .map(([, connection]) => connection);
-
-    targetConnections.forEach((connection) => {
-      switch (action.action) {
-        case 'TOGGLE_SELECTION_MODE':
-          this.sendMessage(connection.port, {
-            type: 'TOGGLE_SELECTION_MODE' as const,
-            target: connection.name,
-            enabled: action.enabled,
-          });
-          break;
-      }
-    });
   }
 
   private handleElementSelected(message: ElementSelectedMessage): void {
