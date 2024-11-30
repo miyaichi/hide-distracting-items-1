@@ -3,7 +3,7 @@ import {
   DomainInfoMessage,
   ElementSelectedMessage,
   Message,
-  TabActivatedMessage
+  TabActivatedMessage,
 } from '../types/types';
 import { createContentScriptName } from '../utils/connectionTypes';
 import { Logger } from '../utils/logger';
