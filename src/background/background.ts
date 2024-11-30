@@ -2,9 +2,9 @@ import {
   ConnectionName,
   ContentActionMessage,
   DomainInfoMessage,
-  ElementActionMessage,
   ElementSelectedMessage,
   Message,
+  TabActivatedMessage,
 } from '../types/types';
 import { createContentScriptName } from '../utils/connectionTypes';
 import { Logger } from '../utils/logger';
@@ -100,6 +100,17 @@ class BackgroundService {
       const tab = await chrome.tabs.get(tabId);
       if (tab.url) {
         const url = new URL(tab.url);
+
+        // Notify SidePanel
+        const sidepanelConnection = this.connections.get('sidepanel');
+        if (sidepanelConnection) {
+          this.sendMessage<TabActivatedMessage>(sidepanelConnection.port, {
+            type: 'TAB_ACTIVATED',
+            target: 'sidepanel',
+            tabId,
+          });
+        }
+
         await this.updateDomainInfo({ domain: url.hostname, url: tab.url });
       }
     } catch (error) {
@@ -230,13 +241,6 @@ class BackgroundService {
 
     targetConnections.forEach((connection) => {
       switch (action.action) {
-        case 'SHOW_ELEMENT':
-          this.sendMessage<ElementActionMessage>(connection.port, {
-            type: 'SHOW_ELEMENT',
-            target: connection.name,
-            identifier: action.identifier,
-          });
-          break;
         case 'TOGGLE_SELECTION_MODE':
           this.sendMessage(connection.port, {
             type: 'TOGGLE_SELECTION_MODE' as const,
@@ -244,12 +248,6 @@ class BackgroundService {
             enabled: action.enabled,
           });
           break;
-        case 'CLEAR_ALL':
-          this.sendMessage(connection.port, {
-            type: 'CLEAR_ALL' as const,
-            target: connection.name,
-          });
-          break; 
       }
     });
   }

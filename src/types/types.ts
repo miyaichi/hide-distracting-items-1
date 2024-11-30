@@ -37,6 +37,7 @@ export type MessageType =
   | 'HIDE_ELEMENT'
   | 'INITIALIZE_CONTENT'
   | 'SHOW_ELEMENT'
+  | 'TAB_ACTIVATED'
   | 'TOGGLE_SELECTION_MODE';
 
 export interface BaseMessage {
@@ -67,9 +68,14 @@ export interface InitializeContentMessage extends BaseMessage {
   domain: string;
 }
 
-export interface ElementActionMessage extends BaseMessage {
-  type: 'HIDE_ELEMENT' | 'SHOW_ELEMENT';
+export interface ShowElementMessage extends BaseMessage {
+  type: 'SHOW_ELEMENT';
   identifier: ElementIdentifier;
+}
+
+export interface TabActivatedMessage extends BaseMessage {
+  type: 'TAB_ACTIVATED';
+  tabId: number;
 }
 
 export interface ToggleSelectionModeMessage extends BaseMessage {
@@ -77,16 +83,14 @@ export interface ToggleSelectionModeMessage extends BaseMessage {
   enabled: boolean;
 }
 
-export type ContentAction =
-  | { action: 'CLEAR_ALL' }
-  | { action: 'SHOW_ELEMENT'; identifier: ElementIdentifier }
-  | { action: 'TOGGLE_SELECTION_MODE'; enabled: boolean };
+export type ContentAction = { action: 'TOGGLE_SELECTION_MODE'; enabled: boolean };
 
 export type Message =
-  | InitializeContentMessage
-  | ToggleSelectionModeMessage
-  | ElementActionMessage
+  | ContentActionMessage
   | DomainInfoMessage
   | ElementSelectedMessage
-  | ContentActionMessage
+  | InitializeContentMessage
+  | ShowElementMessage
+  | TabActivatedMessage
+  | ToggleSelectionModeMessage
   | (BaseMessage & { type: 'CLEAR_ALL' });

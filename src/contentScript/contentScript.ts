@@ -3,7 +3,7 @@ import {
   DomainSettings,
   ElementIdentifier,
   ElementSelectedMessage,
-  Message
+  Message,
 } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
 import { createContentScriptName } from '../utils/connectionTypes';
@@ -111,9 +111,6 @@ class ContentScript {
           break;
         case 'TOGGLE_SELECTION_MODE':
           this.toggleSelectionMode(message.enabled);
-          break;
-        case 'HIDE_ELEMENT':
-          this.hideElement(message.identifier);
           break;
         case 'SHOW_ELEMENT':
           this.showElement(message.identifier);
