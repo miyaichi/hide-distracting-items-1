@@ -249,14 +249,7 @@ class BackgroundService {
             type: 'CLEAR_ALL' as const,
             target: connection.name,
           });
-          break;
-        case 'APPLY_RULES':
-          this.sendMessage(connection.port, {
-            type: 'CONTENT_ACTION',
-            target: connection.name,
-            action: action,
-          });
-          break;
+          break; 
       }
     });
   }

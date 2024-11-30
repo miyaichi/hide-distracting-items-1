@@ -1,10 +1,9 @@
 import {
-  ContentActionMessage,
   DomainInfoMessage,
   DomainSettings,
   ElementIdentifier,
   ElementSelectedMessage,
-  Message,
+  Message
 } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
 import { createContentScriptName } from '../utils/connectionTypes';
@@ -143,21 +142,9 @@ class ContentScript {
       const rules = settings.hiddenElements.length;
       const applyed = this.applyHiddenElements(settings.hiddenElements);
       logger.debug(`Applied ${applyed} / ${rules} rules`);
-      this.NotifyApplyRules(rules, applyed);
     } catch (error) {
       logger.error('Error loading settings:', error);
     }
-  }
-
-  private NotifyApplyRules(rules: number, applyed: number) {
-    this.connection.sendMessage<ContentActionMessage>('background', {
-      type: 'CONTENT_ACTION',
-      action: {
-        action: 'APPLY_RULES',
-        rules,
-        applyed,
-      },
-    });
   }
 
   private applyHiddenElements(hiddenElements: ElementIdentifier[]): number {

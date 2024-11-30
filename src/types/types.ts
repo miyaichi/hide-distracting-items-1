@@ -78,7 +78,6 @@ export interface ToggleSelectionModeMessage extends BaseMessage {
 }
 
 export type ContentAction =
-  | { action: 'APPLY_RULES'; rules: number; applyed: number }
   | { action: 'CLEAR_ALL' }
   | { action: 'SHOW_ELEMENT'; identifier: ElementIdentifier }
   | { action: 'TOGGLE_SELECTION_MODE'; enabled: boolean };
