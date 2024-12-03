@@ -1,166 +1,249 @@
-import { ConnectionName, ConnectionStatus, Message } from '../types/types';
-import { getTabIdFromConnectionName, isContentScriptConnection } from './connectionTypes';
+import { BaseMessage, MessageHandler } from '../types/messages';
+import { ConnectionStatus, Context } from '../types/types';
 import { Logger } from './logger';
-
-const logger = new Logger('ConnectionManager');
 
 export class ConnectionManager {
   private port: chrome.runtime.Port | null = null;
-  private connectionStatus: ConnectionStatus = 'disconnected';
+  private status: ConnectionStatus = 'disconnected';
   private readonly maxReconnectAttempts = 3;
   private reconnectAttempts = 0;
+  private readonly logger: Logger;
+  private readonly messageHandler: MessageHandler | null = null;
+  private isReconnecting = false;
+  private lastConnectTime: number = 0;
+  private disconnectListener: ((port: chrome.runtime.Port) => void) | null = null;
 
-  /**
-   * Established a new connection
-   * @param name Connection name
-   * @returns Port object
-   */
-  connect(name: ConnectionName): chrome.runtime.Port {
-    try {
-      logger.log(`Connecting as ${name}...`);
-      this.connectionStatus = 'connecting';
-      this.disconnectExistingPort();
-      return this.establishNewConnection(name);
-    } catch (error) {
-      logger.error('Connection error:', error);
-      this.connectionStatus = 'disconnected';
-      throw new Error(`Failed to establish connection as ${name}`);
-    }
+  constructor(
+    private readonly context: Context,
+    private readonly onMessage?: MessageHandler,
+    logger?: Logger
+  ) {
+    this.logger = logger ?? new Logger(context);
+    this.messageHandler = onMessage ?? null;
+    this.disconnectListener = this.createDisconnectListener();
   }
 
-  /**
-   * Send a message to the target connection
-   * @param target Target connection name
-   * @param message Message object
-   */
-  async sendMessage<T extends Message>(
-    target: T['target'],
-    message: Omit<T, 'target' | 'timestamp'>
-  ): Promise<void> {
-    logger.debug(`Sending message to ${target}:`, message);
+  private createDisconnectListener(): (port: chrome.runtime.Port) => void {
+    return (port: chrome.runtime.Port) => {
+      const error = chrome.runtime.lastError;
 
+      // Ignore early disconnect events
+      if (this.status === 'connected' && Date.now() - this.lastConnectTime < 1000) {
+        this.logger.debug('Ignoring early disconnect event');
+        return;
+      }
+
+      this.handleDisconnection(error);
+    };
+  }
+
+  private setupConnectionHandlers(): void {
+    if (!this.port) return;
+
+    // Disconnect event listener if it exists
+    if (this.disconnectListener) {
+      this.port.onDisconnect.removeListener(this.disconnectListener);
+    }
+
+    // Add disconnect listener
+    this.disconnectListener = this.createDisconnectListener();
+    this.port.onDisconnect.addListener(this.disconnectListener);
+
+    // Message handler
+    this.port.onMessage.addListener((message: BaseMessage) => {
+      this.handleMessage(message);
+    });
+  }
+
+  connect(): chrome.runtime.Port {
     try {
-      await this.ensureConnection(target);
-      await this.postMessage(target, message as T);
+      // Ignore if already connected
+      if (this.status === 'connected' && this.port) {
+        return this.port;
+      }
+
+      this.status = 'connecting';
+      this.disconnectExisting();
+
+      this.port = chrome.runtime.connect({ name: this.context });
+      this.lastConnectTime = Date.now();
+      this.setupConnectionHandlers();
+
+      this.status = 'connected';
+      this.reconnectAttempts = 0;
+      this.isReconnecting = false;
+      this.logger.debug('Connected successfully');
+
+      return this.port;
     } catch (error) {
-      logger.error('Message sending failed:', error);
+      this.handleConnectionError(error);
       throw error;
     }
   }
 
-  /**
-   * Get the current connection status
-   * @returns Connection status
-   */
-  getConnectionStatus(): ConnectionStatus {
-    return this.connectionStatus;
+  private handleDisconnection(error: chrome.runtime.LastError | undefined): void {
+    this.logger.debug('Disconnect event received', {
+      status: this.status,
+      isReconnecting: this.isReconnecting,
+      timeSinceConnect: Date.now() - this.lastConnectTime,
+      error: error?.message,
+    });
+
+    if (this.isReconnecting) {
+      return;
+    }
+
+    const wasConnected = this.status === 'connected';
+    this.status = 'disconnected';
+    this.port = null;
+
+    if (this.isExtensionContextInvalidated(error)) {
+      this.logger.warn('Extension context invalidated');
+      return;
+    }
+
+    if (
+      wasConnected &&
+      this.shouldAttemptReconnection() &&
+      Date.now() - this.lastConnectTime >= 1000
+    ) {
+      this.isReconnecting = true;
+      this.reconnectWithBackoff().finally(() => {
+        this.isReconnecting = false;
+      });
+    }
   }
 
-  /**
-   * Disconnect from the current connection
-   */
+  getStatus(): ConnectionStatus {
+    return this.status;
+  }
+
+  async sendMessage<T extends BaseMessage>(
+    target: Context,
+    messageData: Omit<T, 'source' | 'target' | 'timestamp'>
+  ): Promise<void> {
+    if (!this.port || this.status !== 'connected') {
+      return;
+    }
+
+    try {
+      const message = {
+        ...messageData,
+        source: this.context,
+        target,
+        timestamp: Date.now(),
+      } as T;
+
+      this.port.postMessage(message);
+      this.logger.debug('Message sent', { target, type: message.type });
+    } catch (error) {
+      this.handleMessageError(error);
+      throw error;
+    }
+  }
+
   disconnect(): void {
-    this.disconnectExistingPort();
+    this.disconnectExisting();
   }
 
-  private disconnectExistingPort(): void {
+  private disconnectExisting(): void {
     if (this.port) {
-      logger.debug('Disconnecting existing connection');
       try {
         this.port.disconnect();
       } catch (error) {
-        logger.warn('Error during disconnection:', error);
+        this.logger.warn('Error during disconnection:', error);
       }
       this.port = null;
-      this.connectionStatus = 'disconnected';
+      this.status = 'disconnected';
     }
   }
 
-  private establishNewConnection(name: ConnectionName): chrome.runtime.Port {
-    const newPort = chrome.runtime.connect({ name });
+  private async reconnectWithBackoff(): Promise<void> {
+    try {
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        this.logger.error('Max reconnection attempts reached');
+        return;
+      }
 
-    newPort.onDisconnect.addListener(() => {
-      logger.log(`Disconnected: ${name}`);
-      this.handleDisconnection();
-    });
-
-    this.port = newPort;
-    this.connectionStatus = 'connected';
-    this.reconnectAttempts = 0;
-    logger.log(`Successfully connected as ${name}`);
-
-    return newPort;
-  }
-
-  private async ensureConnection(target: ConnectionName): Promise<void> {
-    const baseDelay = 100; // Base delay for exponential backoff (Milliseconds)
-    const maxDelay = 5000; // Maximum delay for exponential backoff (Milliseconds)
-
-    while (!this.port && this.reconnectAttempts < this.maxReconnectAttempts) {
-      // Exponential backoff
-      // If you not want to use exponential backoff, you can use the following code:
-      // const delay = baseDelay;
+      const baseDelay = 1000;
+      const maxDelay = 5000;
       const delay = Math.min(baseDelay * Math.pow(2, this.reconnectAttempts), maxDelay);
 
-      logger.warn('No connection available. Attempting to reconnect...', {
-        attempt: this.reconnectAttempts + 1,
+      this.reconnectAttempts++;
+      this.logger.debug('Attempting reconnection', {
+        attempt: this.reconnectAttempts,
         delay,
       });
 
-      this.reconnectAttempts++;
-      await this.sleep(delay);
+      await new Promise((resolve) => setTimeout(resolve, delay));
 
+      // Check if the connection was re-established by another reconnection attempt
+      if (this.status === 'connected' || !this.isReconnecting) {
+        return;
+      }
+
+      this.connect();
+    } catch (error) {
+      this.handleConnectionError(error);
+    }
+  }
+
+  private handleConnectionError(error: unknown): void {
+    this.status = 'disconnected';
+    this.logger.error('Connection error:', error);
+  }
+
+  private handleMessageError(error: unknown): void {
+    this.logger.error('Message sending failed:', error);
+
+    if (this.isConnectionError(error)) {
+      this.handleDisconnection(undefined);
+    }
+  }
+
+  private shouldAttemptReconnection(): boolean {
+    return (
+      this.context !== 'background' &&
+      this.reconnectAttempts < this.maxReconnectAttempts &&
+      this.status === 'disconnected' &&
+      !this.isReconnecting
+    );
+  }
+
+  private isConnectionError(error: unknown): boolean {
+    return error instanceof Error && error.message.includes('Could not establish connection');
+  }
+
+  private isExtensionContextInvalidated(error: unknown): boolean {
+    return (
+      error &&
+      'message' in (error as any) &&
+      (error as any).message.includes('Extension context invalidated')
+    );
+  }
+
+  private handleMessage(message: BaseMessage): void {
+    // Check message target
+    if (message.target !== this.context) {
+      return;
+    }
+
+    this.logger.debug('Message received', {
+      from: message.source,
+      type: message.type,
+    });
+
+    // Process the message with the registered handler
+    if (this.messageHandler) {
       try {
-        this.port = this.connect(target);
+        this.messageHandler(message);
       } catch (error) {
-        logger.error('Reconnection attempt failed:', error);
+        this.logger.error('Error in message handler:', error);
       }
     }
-
-    if (!this.port) {
-      throw new Error('Failed to establish connection after maximum attempts');
-    }
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  private async postMessage<T extends Message>(
-    target: T['target'],
-    message: Omit<T, 'target' | 'timestamp'>
-  ): Promise<void> {
-    if (!this.port) {
-      throw new Error('No connection available');
-    }
-
-    try {
-      const enrichedMessage = {
-        ...message,
-        target,
-        timestamp: Date.now(),
-      };
-
-      this.port.postMessage(enrichedMessage);
-      logger.debug('Message sent successfully', {
-        target,
-        messageType: message.type,
-      });
-    } catch (error) {
-      logger.error('Failed to send message:', error);
-      this.handleDisconnection();
-      throw error;
-    }
-  }
-
-  private handleDisconnection(): void {
-    const name: ConnectionName = this.port?.name as ConnectionName;
-    if (this.port && isContentScriptConnection(name)) {
-      const tabId = getTabIdFromConnectionName(this.port.name as ConnectionName);
-      logger.debug(`Content script disconnected for tab ${tabId}`);
-    }
-    this.port = null;
-    this.connectionStatus = 'disconnected';
-    logger.log('Connection status changed to:', this.connectionStatus);
   }
 }
+
+export const createConnectionManager = (context: Context): ConnectionManager => {
+  return new ConnectionManager(context);
+};

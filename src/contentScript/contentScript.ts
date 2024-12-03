@@ -1,64 +1,69 @@
-import {
-  DomainInfoMessage,
-  DomainSettings,
-  ElementIdentifier,
-  ElementSelectedMessage,
-  Message,
-} from '../types/types';
+import { MessageHandler, MessagePayloads } from '../types/messages';
+import { DomainSettings, ElementIdentifier } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
-import { createContentScriptName } from '../utils/connectionTypes';
 import { ElementFinder } from '../utils/elementFinder';
 import { Logger } from '../utils/logger';
 import { StorageManager } from '../utils/storageManager';
 
-const logger = new Logger('ContentScript');
-
 class ContentScript {
-  private static instance: ContentScript | null = null;
-  private connection: ConnectionManager;
+  private connectionManager: ConnectionManager | null = null;
+  private logger: Logger;
   private isSelectionMode = false;
   private hoveredElement: Element | null = null;
   private currentDomain: string;
 
-  private constructor() {
-    logger.log('Content script instance created');
-    this.connection = new ConnectionManager();
+  constructor(sender: chrome.runtime.MessageSender) {
+    this.logger = new Logger('content-script');
+    this.setupPermanentConnection(sender.tab?.id || 0);
     this.currentDomain = new URL(window.location.href).hostname;
 
     this.injectStyles();
-    this.setupMessageListeners();
     this.setupEventListeners();
-    this.notifyDomain();
   }
 
-  public static getInstance(): ContentScript {
-    if (!ContentScript.instance) {
-      ContentScript.instance = new ContentScript();
-      logger.debug('Created new ContentScript instance');
-    } else {
-      logger.debug('Returning existing ContentScript instance');
+  private async setupPermanentConnection(tabId: number) {
+    try {
+      if (this.connectionManager) return;
+
+      this.logger.debug('Setting up permanent connection', { tabId });
+      this.connectionManager = new ConnectionManager(
+        `content-${tabId}`,
+        this.handlePermanentMessages
+      );
+      this.connectionManager.connect();
+      this.logger.debug('Permanent connection established', { tabId });
+    } catch (error) {
+      this.logger.error('Failed to setup permanent connection:', error);
     }
-    return ContentScript.instance;
   }
 
-  public static isInstantiated(): boolean {
-    return !!ContentScript.instance;
-  }
+  private handlePermanentMessages: MessageHandler = (message) => {
+    switch (message.type) {
+      case 'SIDEPANEL_CLOSED':
+        this.logger.debug('Sidepanel closed, performing cleanup');
+        this.performCleanup();
+        break;
+      // Implement other message handling here ...
+      case 'INITIALIZE_CONTENT':
+        this.initialization();
+        break;
+      case 'RESTORE_HIDDEN_ELEMENTS':
+        this.restoreHiddenElements();
+        break;
+      case 'UNHIDE_ELEMENT':
+        const unhideElementPayload = message.payload as MessagePayloads['UNHIDE_ELEMENT'];
+        this.unhideElement(unhideElementPayload.identifier);
+        break;
+      case 'TOGGLE_SELECTION_MODE':
+        const togglePayload = message.payload as MessagePayloads['TOGGLE_SELECTION_MODE'];
+        this.toggleSelectionMode(togglePayload.enabled);
+        break;
+    }
+  };
 
-  public reinitialize(): void {
-    logger.log('Reinitializing content script');
-    this.currentDomain = new URL(window.location.href).hostname;
-    this.notifyDomain();
-    this.loadSavedSettings();
-  }
-
-  private notifyDomain() {
-    logger.debug('Notifying domain info:', this.currentDomain);
-    this.connection.sendMessage<DomainInfoMessage>('background', {
-      type: 'DOMAIN_INFO',
-      domain: this.currentDomain,
-      url: window.location.href,
-    });
+  private performCleanup() {
+    this.logger.debug('Starting cleanup');
+    this.toggleSelectionMode(false);
   }
 
   private injectStyles() {
@@ -95,52 +100,24 @@ class ContentScript {
     `;
   }
 
-  private async setupMessageListeners() {
-    this.disconnectExistingConnection();
+  // Content initialization
+  private async initialization() {
+    this.currentDomain = new URL(window.location.href).hostname;
 
-    const tabId = await chrome.runtime.sendMessage({ type: 'GET_TAB_ID' });
-    this.connection = new ConnectionManager();
-    const port = this.connection.connect(createContentScriptName(tabId));
-
-    port.onMessage.addListener(async (message: Message) => {
-      logger.debug(`Processing message type: ${message.type}`);
-
-      switch (message.type) {
-        case 'INITIALIZE_CONTENT':
-          await this.handleInitialization(message.domain);
-          break;
-        case 'TOGGLE_SELECTION_MODE':
-          this.toggleSelectionMode(message.enabled);
-          break;
-        case 'SHOW_ELEMENT':
-          this.showElement(message.identifier);
-          break;
-        case 'CLEAR_ALL':
-          this.showAllElements();
-          break;
-      }
-    });
+    this.logger.debug('Initializing content script for domain:', this.currentDomain);
+    await this.loadAndApplySettings();
   }
 
-  private async handleInitialization(domain: string) {
-    logger.debug('Handling initialization for domain:', domain);
-    if (this.currentDomain !== domain) {
-      this.currentDomain = domain;
-      await this.loadSavedSettings();
-    }
-  }
-
-  private async loadSavedSettings() {
+  private async loadAndApplySettings() {
     try {
       const settings: DomainSettings = await StorageManager.getDomainSettings(this.currentDomain);
-      logger.debug('Loaded settings:', settings);
+      this.logger.debug('Loaded settings:', settings);
 
-      this.showAllElements();
-      const rules = settings.hiddenElements.length;
+      this.restoreHiddenElements();
       const applyed = this.applyHiddenElements(settings.hiddenElements);
-      logger.debug(`Applied ${applyed} / ${rules} rules`);
+      this.logger.debug(`Applied hidden settings to ${applyed} elements`);
     } catch (error) {
-      logger.error('Error loading settings:', error);
+      this.logger.error('Error loading settings:', error);
     }
   }
 
@@ -156,37 +133,7 @@ class ContentScript {
     return applyed;
   }
 
-  private hideElement(identifier: ElementIdentifier): boolean {
-    logger.debug('Hiding element:', identifier);
-    const element = this.findElement(identifier);
-    if (element) {
-      element.classList.add('hde-hidden');
-      logger.debug('Element hidden successfully');
-      return true;
-    } else {
-      logger.warn('Failed to find element to hide:', identifier);
-      return false;
-    }
-  }
-
-  private showElement(identifier: ElementIdentifier) {
-    logger.debug('Showing element:', identifier);
-    const element = this.findElement(identifier);
-    if (element) {
-      element.classList.remove('hde-hidden');
-      logger.debug('Element shown successfully');
-    } else {
-      logger.warn('Failed to find element to show:', identifier);
-    }
-  }
-
-  private showAllElements() {
-    const hiddenElements = document.getElementsByClassName('hde-hidden');
-    Array.from(hiddenElements).forEach((element) => {
-      element.classList.remove('hde-hidden');
-    });
-  }
-
+  // Toggle selection mode
   private toggleSelectionMode(enabled: boolean) {
     if (this.isSelectionMode === enabled) return;
 
@@ -199,11 +146,7 @@ class ContentScript {
       this.disableSelectionMode();
     }
 
-    if (enabled) {
-      logger.debug('Selection mode enabled');
-    } else {
-      logger.debug('Selection mode disabled');
-    }
+    this.logger.debug('Selection mode toggled', { enabled });
   }
 
   private cleanupSelectionMode() {
@@ -279,23 +222,44 @@ class ContentScript {
     const target = e.target as Element;
     const identifier = ElementFinder.getElementIdentifier(target);
 
-    logger.log('Element selected:', identifier);
-    this.connection.sendMessage<ElementSelectedMessage>('background', {
-      type: 'ELEMENT_SELECTED',
-      domain: this.currentDomain,
-      identifier,
+    this.logger.log('Element selected:', identifier);
+    this.connectionManager?.sendMessage('sidepanel', {
+      type: 'ELEMENT_HIDDEN',
+      payload: { domain: this.currentDomain, identifier },
     });
 
     target.classList.add('hde-hidden');
   }
 
-  private disconnectExistingConnection() {
-    if (this.connection) {
-      try {
-        this.connection.disconnect();
-      } catch (e) {
-        logger.warn('Error disconnecting existing connection:', e);
-      }
+  // Utility functions
+  private restoreHiddenElements() {
+    const hiddenElements = document.getElementsByClassName('hde-hidden');
+    Array.from(hiddenElements).forEach((element) => {
+      element.classList.remove('hde-hidden');
+    });
+  }
+
+  private unhideElement(identifier: ElementIdentifier) {
+    this.logger.debug('Showing element:', identifier);
+    const element = this.findElement(identifier);
+    if (element) {
+      element.classList.remove('hde-hidden');
+      this.logger.debug('Element shown successfully');
+    } else {
+      this.logger.warn('Failed to find element to show:', identifier);
+    }
+  }
+
+  private hideElement(identifier: ElementIdentifier): boolean {
+    this.logger.debug('Hiding element:', identifier);
+    const element = this.findElement(identifier);
+    if (element) {
+      element.classList.add('hde-hidden');
+      this.logger.debug('Element hidden successfully');
+      return true;
+    } else {
+      this.logger.warn('Failed to find element to hide:', identifier);
+      return false;
     }
   }
 
@@ -305,7 +269,7 @@ class ContentScript {
     try {
       element = document.querySelector(identifier.domPath);
     } catch (e) {
-      logger.debug('Failed to find element by domPath:', e);
+      this.logger.debug('Failed to find element by domPath:', e);
     }
 
     if (!element) {
@@ -325,16 +289,34 @@ class ContentScript {
   }
 }
 
-// Check if the content script has already been initialized
-if (!window.hasOwnProperty('hideDistractingElementsInitialized')) {
-  logger.log('Content script loading for the first time...');
-  // @ts-ignore
-  window.hideDistractingElementsInitialized = true;
-  const contentScript = ContentScript.getInstance();
-} else {
-  logger.log('Content script already initialized, reinitializing...');
-  if (ContentScript.isInstantiated()) {
-    const instance = ContentScript.getInstance();
-    instance.reinitialize();
+// ContentScript initialization
+const contentScriptInstances = new WeakMap<Window, ContentScript>();
+
+// Ensure content script is initialized immediately
+if (!contentScriptInstances.has(window)) {
+  const logger = new Logger('content-script');
+
+  try {
+    logger.log('Initializing content script...');
+    // Get the tab ID from the background
+    chrome.runtime.sendMessage({ type: 'GET_TAB_ID' }, (response) => {
+      if (chrome.runtime.lastError) {
+        logger.error('Failed to get tab ID:', chrome.runtime.lastError);
+        return;
+      }
+
+      if (!response?.tabId) {
+        logger.error('No tab ID received in response');
+        return;
+      }
+
+      const sender = {
+        tab: { id: response.tabId },
+      } as chrome.runtime.MessageSender;
+
+      contentScriptInstances.set(window, new ContentScript(sender));
+    });
+  } catch (error) {
+    logger.error('Failed to initialize content script:', error);
   }
 }

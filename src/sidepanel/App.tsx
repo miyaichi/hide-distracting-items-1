@@ -1,71 +1,148 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ConnectionName,
-  DomainSettings,
-  ElementIdentifier,
-  Message,
-  ShowElementMessage,
-  ToggleSelectionModeMessage,
-} from '../types/types';
+import { BaseMessage, MessagePayloads, TabInfo } from '../types/messages';
+import { Context, ElementIdentifier } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
-import { createContentScriptName } from '../utils/connectionTypes';
 import { Logger } from '../utils/logger';
 import { StorageManager } from '../utils/storageManager';
 import { Controls } from './components/Controls';
 import { HiddenElementList } from './components/HiddenElementList';
 
-const logger = new Logger('Sidepanel');
+const logger = new Logger('sidepanel');
 
-export const App: React.FC = () => {
-  const [currentTabId, setCurrentTabId] = useState<number | null>(null);
+export default function App() {
+  const [activeTabInfo, setactiveTabInfo] = useState<TabInfo | null>(null);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [hiddenElements, setHiddenElements] = useState<ElementIdentifier[]>([]);
   const [currentDomain, setCurrentDomain] = useState<string>('');
-  const [connection] = useState(() => new ConnectionManager());
+  const [hiddenElements, setHiddenElements] = useState<ElementIdentifier[]>([]);
+  const [connectionManager, setConnectionManager] = useState<ConnectionManager | null>(null);
+  const [contentScriptContext, setContentScriptContext] = useState<Context>('undefined');
+  const initialized = React.useRef(false);
 
   useEffect(() => {
-    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-      if (tab?.id) {
-        setCurrentTabId(tab.id);
-      }
-    });
-  }, []);
-
-  const loadDomainSettings = useCallback(async (domain: string) => {
-    try {
-      const settings: DomainSettings = await StorageManager.getDomainSettings(domain);
-      logger.debug('Loaded settings for domain:', domain, settings);
-      setHiddenElements(settings.hiddenElements);
-    } catch (error) {
-      logger.error('Error loading domain settings:', error);
+    if (initialized.current) {
+      logger.debug('App already initialized, skipping...');
+      return;
     }
+
+    const initializeTab = async () => {
+      if (initialized.current) {
+        return;
+      }
+
+      try {
+        const manager = new ConnectionManager('sidepanel', handleMessage);
+        manager.connect();
+        setConnectionManager(manager);
+
+        // Initialize active tab
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id) {
+          setactiveTabInfo({ tabId: tab.id, windowId: tab.windowId, url: tab.url || '' });
+          initialized.current = true;
+        }
+
+        logger.debug('Initalized', { tab });
+      } catch (error) {
+        logger.error('Tab initialization failed:', error);
+      }
+    };
+
+    initializeTab();
+
+    // Monitor active tab change
+    const handleTabChange = async (activeInfo: chrome.tabs.TabActiveInfo) => {
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+      if (!tab.url) return;
+
+      setactiveTabInfo({ tabId: activeInfo.tabId, windowId: activeInfo.windowId, url: tab.url });
+    };
+    chrome.tabs.onActivated.addListener(handleTabChange);
+
+    // Monitor tab URL change
+    const handleTabUpdated = async (
+      tabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+      tab: chrome.tabs.Tab
+    ) => {
+      if (changeInfo.status === 'complete') {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (activeTab.id === tabId) {
+          setactiveTabInfo({ tabId, windowId: tab.windowId, url: tab.url || '' });
+        }
+      }
+    };
+    chrome.tabs.onUpdated.addListener(handleTabUpdated);
+
+    // Monitor window focus change
+    const handleWindowFocus = async (windowId: number) => {
+      if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+
+      const [tab] = await chrome.tabs.query({ active: true, windowId });
+      if (!tab?.url) return;
+
+      setactiveTabInfo({ tabId: tab.id!, windowId, url: tab.url });
+    };
+    chrome.windows.onFocusChanged.addListener(handleWindowFocus);
+
+    return () => {
+      chrome.tabs.onActivated.removeListener(handleTabChange);
+      chrome.tabs.onUpdated.removeListener(handleTabUpdated);
+      chrome.windows.onFocusChanged.removeListener(handleWindowFocus);
+      connectionManager?.disconnect();
+    };
   }, []);
 
-  const handleTabActivated = useCallback(async (message: { tabId: number }) => {
-    const { tabId } = message;
-    logger.debug('Tab activated with ID:', tabId);
+  useEffect(() => {
+    const domain = activeTabInfo?.url ? new URL(activeTabInfo.url).hostname : '';
+    if (currentDomain !== domain) {
+      setCurrentDomain(domain);
+    }
+    setContentScriptContext(activeTabInfo?.tabId ? `content-${activeTabInfo.tabId}` : 'undefined');
+  }, [activeTabInfo]);
 
-    setCurrentTabId(tabId);
-    handleToggleSelectionMode(false);
-    const currentContentScriptName = createContentScriptName(tabId);
-    connection.sendMessage<ToggleSelectionModeMessage>(currentContentScriptName, {
-      type: 'TOGGLE_SELECTION_MODE',
-      enabled: false,
-    });
-  }, []);
+  useEffect(() => {
+    if (connectionManager && contentScriptContext !== 'undefined') {
+      connectionManager?.sendMessage(contentScriptContext, {
+        type: 'TOGGLE_SELECTION_MODE',
+        payload: { enabled: isSelectionMode },
+      });
+    }
+  }, [isSelectionMode, contentScriptContext]);
 
-  const handleDomainChange = useCallback(
-    async (newDomain: string) => {
-      logger.log('Domain changed to:', newDomain);
-      setCurrentDomain(newDomain);
-      setIsSelectionMode(false);
-      //handleToggleSelectionMode(false);
-      await loadDomainSettings(newDomain);
-    },
-    [loadDomainSettings]
-  );
+  /*
+  useEffect(() => {
+    if (!currentDomain) return;
 
-  const handleElementSelected = useCallback(async (element: ElementIdentifier, domain: string) => {
+    const loadDomainSettings = async () => {
+      try {
+        const settings = await StorageManager.getDomainSettings(currentDomain);
+        setHiddenElements(settings.hiddenElements);
+      } catch (error) {
+        logger.error('Failed to load domain settings:', error);
+      }
+    };
+
+    loadDomainSettings();
+  }, [currentDomain]);
+*/
+
+  // Message handler
+  const handleMessage = (message: BaseMessage) => {
+    logger.debug('Message received', { type: message.type });
+    switch (message.type) {
+      case 'ELEMENT_HIDDEN':
+        const elementHiddenPayload = message.payload as MessagePayloads['ELEMENT_HIDDEN'];
+        handleElementHidden(elementHiddenPayload.domain, elementHiddenPayload.identifier);
+        break;
+    }
+  };
+
+  // UI event handlers
+  const handleToggleSelectionMode = (enabled: boolean) => {
+    setIsSelectionMode(enabled);
+  };
+
+  const handleElementHidden = useCallback(async (domain: string, element: ElementIdentifier) => {
     logger.log('Element selected for domain:', domain);
     setHiddenElements((prevElements) => {
       const newElements = [...prevElements, element];
@@ -84,102 +161,48 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  const handleMessage = useCallback(
-    async (message: Message) => {
-      logger.debug('Received message:', message);
-      switch (message.type) {
-        case 'DOMAIN_INFO':
-          await handleDomainChange(message.domain);
-          break;
-        case 'ELEMENT_SELECTED':
-          await handleElementSelected(message.identifier, message.domain);
-          break;
-        case 'TAB_ACTIVATED':
-          await handleTabActivated(message);
-          break;
-      }
-    },
-    [handleDomainChange, handleElementSelected]
-  );
+  const handleRestoreHiddenElements = async () => {
+    logger.debug('Clearing all hidden elements');
 
-  const handleRemoveElement = useCallback(
-    async (element: ElementIdentifier) => {
-      if (!currentDomain || currentTabId === null) return;
-
-      logger.log('Removing element:', element);
-      setHiddenElements((prevElements) => {
-        const newElements = prevElements.filter((e) => e.domPath !== element.domPath);
-
-        const contentScriptName: ConnectionName = createContentScriptName(currentTabId);
-        connection.sendMessage<ShowElementMessage>(contentScriptName, {
-          type: 'SHOW_ELEMENT',
-          identifier: element,
-        });
-
-        StorageManager.saveDomainSettings(currentDomain, {
-          hiddenElements: newElements,
-          enabled: true,
-        }).catch((error) => {
-          logger.error('Error saving domain settings:', error);
-        });
-
-        return newElements;
-      });
-    },
-    [currentDomain, connection]
-  );
-
-  const handleToggleSelectionMode = useCallback(
-    (enabled: boolean) => {
-      if (!currentDomain || !currentTabId) return;
-
-      logger.log('Selection mode toggled:', enabled);
-      setIsSelectionMode(enabled);
-      const currentContentScriptName = createContentScriptName(currentTabId);
-      connection.sendMessage<ToggleSelectionModeMessage>(currentContentScriptName, {
-        type: 'TOGGLE_SELECTION_MODE',
-        enabled,
-      });
-      /*
-      connection.sendMessage<ContentActionMessage>('background', {
-        type: 'CONTENT_ACTION',
-        action: {
-          action: 'TOGGLE_SELECTION_MODE',
-          enabled,
-        },
-      });
-*/
-    },
-    [currentDomain, connection]
-  );
-
-  const handleClearAll = useCallback(async () => {
-    if (!currentDomain || !currentTabId) return;
-
-    logger.log('Clearing all elements');
     setHiddenElements([]);
 
-    const contentScriptName: ConnectionName = createContentScriptName(currentTabId);
-    connection.sendMessage<Message>(contentScriptName, { type: 'CLEAR_ALL' });
+    try {
+      await StorageManager.saveDomainSettings(currentDomain, {
+        hiddenElements: [],
+        enabled: true,
+      });
 
-    await StorageManager.saveDomainSettings(currentDomain, {
-      hiddenElements: [],
-      enabled: true,
+      connectionManager?.sendMessage(contentScriptContext, {
+        type: 'RESTORE_HIDDEN_ELEMENTS',
+        payload: undefined,
+      });
+    } catch (error) {
+      logger.error('Failed to clear hidden elements:', error);
+    }
+  };
+
+  const handleUnhideElement = async (identifier: ElementIdentifier) => {
+    if (!currentDomain) return;
+
+    logger.debug('Removing hidden element', identifier);
+    setHiddenElements((prevElements) => {
+      const newElements = prevElements.filter((element) => element.domPath !== identifier.domPath);
+
+      connectionManager?.sendMessage(contentScriptContext, {
+        type: 'UNHIDE_ELEMENT',
+        payload: { identifier: identifier },
+      });
+
+      StorageManager.saveDomainSettings(currentDomain, {
+        hiddenElements: newElements,
+        enabled: true,
+      }).catch((error) => {
+        logger.error('Error saving domain settings:', error);
+      });
+
+      return newElements;
     });
-  }, [currentDomain, connection]);
-
-  useEffect(() => {
-    logger.log('Side panel mounted');
-
-    const port = connection.connect('sidepanel');
-    port.onMessage.addListener(handleMessage);
-
-    return () => {
-      logger.debug('Side panel unmounting');
-      setIsSelectionMode(false);
-      port.disconnect();
-    };
-  }, [connection, handleMessage]);
+  };
 
   return (
     <div className="side-panel-container">
@@ -191,14 +214,12 @@ export const App: React.FC = () => {
       <Controls
         isSelectionMode={isSelectionMode}
         onToggleSelectionMode={handleToggleSelectionMode}
-        onClearAll={handleClearAll}
+        onRestoreHiddenElements={handleRestoreHiddenElements}
       />
 
       <div className="side-panel-content custom-scrollbar">
-        <HiddenElementList elements={hiddenElements} onRemoveElement={handleRemoveElement} />
+        <HiddenElementList elements={hiddenElements} unUnhideElement={handleUnhideElement} />
       </div>
     </div>
   );
-};
-
-export default App;
+}

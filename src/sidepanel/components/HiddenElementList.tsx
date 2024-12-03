@@ -5,7 +5,7 @@ import { Tooltip } from './Tooltip';
 
 interface HiddenElementListProps {
   elements: ElementIdentifier[];
-  onRemoveElement: (element: ElementIdentifier) => void;
+  unUnhideElement: (element: ElementIdentifier) => void;
   onNavigateToParent?: (element: ElementIdentifier) => void;
   onNavigateToChild?: (element: ElementIdentifier, childIndex: number) => void;
   onHighlightElement?: (element: ElementIdentifier | null) => void;
@@ -14,7 +14,7 @@ interface HiddenElementListProps {
 
 export const HiddenElementList: React.FC<HiddenElementListProps> = ({
   elements,
-  onRemoveElement,
+  unUnhideElement,
   onNavigateToParent,
   onNavigateToChild,
   onHighlightElement,
@@ -112,7 +112,7 @@ export const HiddenElementList: React.FC<HiddenElementListProps> = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        onRemoveElement(element);
+                        unUnhideElement(element);
                       }}
                       className="p-1 text-blue-500 hover:bg-blue-50 rounded transition-colors duration-200"
                     >

@@ -1,16 +1,15 @@
-// src/sidepanel/components/Controls.tsx
 import React from 'react';
 
 interface ControlsProps {
   isSelectionMode: boolean;
   onToggleSelectionMode: (enabled: boolean) => void;
-  onClearAll: () => void;
+  onRestoreHiddenElements: () => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
   isSelectionMode,
   onToggleSelectionMode,
-  onClearAll,
+  onRestoreHiddenElements,
 }) => {
   return (
     <div className="p-4 border-b">
@@ -27,7 +26,7 @@ export const Controls: React.FC<ControlsProps> = ({
         </button>
         <button
           className="px-4 py-2 bg-red-100 text-red-500 rounded hover:bg-red-200 transition-colors duration-200"
-          onClick={onClearAll}
+          onClick={onRestoreHiddenElements}
         >
           Clear All
         </button>
