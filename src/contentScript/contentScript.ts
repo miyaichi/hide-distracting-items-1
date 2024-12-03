@@ -10,34 +10,67 @@ class ContentScript {
   private logger: Logger;
   private isSelectionMode = false;
   private hoveredElement: Element | null = null;
-  private currentDomain: string;
+  private currentDomain: string | null = null;
 
-  constructor(sender: chrome.runtime.MessageSender) {
+  constructor() {
     this.logger = new Logger('content-script');
-    this.setupPermanentConnection(sender.tab?.id || 0);
-    this.currentDomain = new URL(window.location.href).hostname;
+    this.initialize();
 
     this.injectStyles();
+    this.setupCurrentDomain();
     this.setupEventListeners();
   }
 
-  private async setupPermanentConnection(tabId: number) {
+  private async initialize() {
     try {
-      if (this.connectionManager) return;
+      // Listen for PING messages
+      chrome.runtime.onMessage.addListener((message) => {
+        if (message.type === 'PING') return true;
+      });
 
-      this.logger.debug('Setting up permanent connection', { tabId });
-      this.connectionManager = new ConnectionManager(
-        `content-${tabId}`,
-        this.handlePermanentMessages
-      );
-      this.connectionManager.connect();
-      this.logger.debug('Permanent connection established', { tabId });
+      // Get activeTabInfo from storage
+      const { activeTabInfo } = await chrome.storage.local.get('activeTabInfo');
+
+      if (activeTabInfo?.isScriptInjectionAllowed) {
+        this.setupConnection(activeTabInfo.tabId);
+      } else {
+        this.logger.debug('Script injection not allowed for this tab');
+      }
+
+      // Listen for storage changes
+      chrome.storage.local.onChanged.addListener((changes) => {
+        const oldTabId = changes.activeTabInfo?.oldValue?.tabId;
+        const newTabId = changes.activeTabInfo?.newValue?.tabId;
+        const isAllowed = changes.activeTabInfo?.newValue?.isScriptInjectionAllowed;
+
+        if (newTabId && newTabId !== oldTabId && isAllowed) {
+          this.setupConnection(newTabId);
+        }
+      });
     } catch (error) {
-      this.logger.error('Failed to setup permanent connection:', error);
+      this.logger.error('Failed to initialize content script:', error);
     }
   }
 
-  private handlePermanentMessages: MessageHandler = (message) => {
+  private setupConnection(tabId: number) {
+    if (this.connectionManager) {
+      this.logger.debug('Connection already established');
+      return;
+    }
+
+    try {
+      this.logger.debug('Setting up connection', { tabId });
+      this.connectionManager = new ConnectionManager(`content-${tabId}`, this.handleMessage);
+      this.connectionManager.connect();
+      this.logger.debug('Connection established', { tabId });
+    } catch (error) {
+      this.logger.error('Failed to setup connection:', error);
+    }
+  }
+
+  private handleMessage: MessageHandler = (message) => {
+    this.logger.debug('Message received', { type: message.type });
+
     switch (message.type) {
       case 'SIDEPANEL_CLOSED':
         this.logger.debug('Sidepanel closed, performing cleanup');
@@ -63,6 +96,7 @@ class ContentScript {
 
   private performCleanup() {
     this.logger.debug('Starting cleanup');
+    // Implement cleanup logic here ...
     this.toggleSelectionMode(false);
   }
 
@@ -100,9 +134,15 @@ class ContentScript {
     `;
   }
 
+  // Domain setup
+  private setupCurrentDomain() {
+    this.currentDomain = new URL(window.location.href).hostname;
+    this.logger.debug('Current domain:', this.currentDomain);
+  }
+
   // Content initialization
   private async initialization() {
-    this.currentDomain = new URL(window.location.href).hostname;
+    this.setupCurrentDomain();
 
     this.logger.debug('Initializing content script for domain:', this.currentDomain);
     await this.loadAndApplySettings();
@@ -110,6 +150,11 @@ class ContentScript {
 
   private async loadAndApplySettings() {
     try {
+      if (!this.currentDomain) {
+        this.logger.warn('Current domain not set');
+        return;
+      }
+
       const settings: DomainSettings = await StorageManager.getDomainSettings(this.currentDomain);
       this.logger.debug('Loaded settings:', settings);
 
@@ -289,34 +334,8 @@ class ContentScript {
   }
 }
 
-// ContentScript initialization
-const contentScriptInstances = new WeakMap<Window, ContentScript>();
-
-// Ensure content script is initialized immediately
-if (!contentScriptInstances.has(window)) {
-  const logger = new Logger('content-script');
-
-  try {
-    logger.log('Initializing content script...');
-    // Get the tab ID from the background
-    chrome.runtime.sendMessage({ type: 'GET_TAB_ID' }, (response) => {
-      if (chrome.runtime.lastError) {
-        logger.error('Failed to get tab ID:', chrome.runtime.lastError);
-        return;
-      }
-
-      if (!response?.tabId) {
-        logger.error('No tab ID received in response');
-        return;
-      }
-
-      const sender = {
-        tab: { id: response.tabId },
-      } as chrome.runtime.MessageSender;
-
-      contentScriptInstances.set(window, new ContentScript(sender));
-    });
-  } catch (error) {
-    logger.error('Failed to initialize content script:', error);
-  }
+// Initialize content script
+if (!window.contentScriptInitialized) {
+  window.contentScriptInitialized = true;
+  new ContentScript();
 }

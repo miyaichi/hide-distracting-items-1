@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import '../styles/globals.css';
+import '../styles/sidepanel.css';
 import App from './App';
 
 const container = document.getElementById('root');

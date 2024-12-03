@@ -5,13 +5,12 @@ export interface TabInfo {
   tabId: number;
   windowId: number;
   url: string;
+  isScriptInjectionAllowed: boolean;
 }
 
 // Message payloads type
 export interface MessagePayloads {
   ELEMENT_HIDDEN: { domain: string; identifier: ElementIdentifier };
-  GET_TAB_ID: undefined;
-  GET_TAB_ID_RESPONSE: { tabId: number };
   INITIALIZE_CONTENT: undefined;
   RESTORE_HIDDEN_ELEMENTS: undefined;
   UNHIDE_ELEMENT: { identifier: ElementIdentifier };

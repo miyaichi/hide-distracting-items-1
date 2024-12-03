@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BaseMessage, MessagePayloads, TabInfo } from '../types/messages';
+import { BaseMessage, MessagePayloads } from '../types/messages';
 import { Context, ElementIdentifier } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
 import { Logger } from '../utils/logger';
@@ -10,7 +10,7 @@ import { HiddenElementList } from './components/HiddenElementList';
 const logger = new Logger('sidepanel');
 
 export default function App() {
-  const [activeTabInfo, setactiveTabInfo] = useState<TabInfo | null>(null);
+  const [tabId, setTabId] = useState<number | null>(null);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [currentDomain, setCurrentDomain] = useState<string>('');
   const [hiddenElements, setHiddenElements] = useState<ElementIdentifier[]>([]);
@@ -37,7 +37,8 @@ export default function App() {
         // Initialize active tab
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tab?.id) {
-          setactiveTabInfo({ tabId: tab.id, windowId: tab.windowId, url: tab.url || '' });
+          setTabId(tab.id);
+          setCurrentDomain(tab?.url ? new URL(tab.url).hostname : '');
           initialized.current = true;
         }
 
@@ -54,7 +55,8 @@ export default function App() {
       const tab = await chrome.tabs.get(activeInfo.tabId);
       if (!tab.url) return;
 
-      setactiveTabInfo({ tabId: activeInfo.tabId, windowId: activeInfo.windowId, url: tab.url });
+      setTabId(activeInfo.tabId);
+      setCurrentDomain(tab?.url ? new URL(tab.url).hostname : '');
     };
     chrome.tabs.onActivated.addListener(handleTabChange);
 
@@ -67,7 +69,8 @@ export default function App() {
       if (changeInfo.status === 'complete') {
         const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (activeTab.id === tabId) {
-          setactiveTabInfo({ tabId, windowId: tab.windowId, url: tab.url || '' });
+          setTabId(tabId);
+          setCurrentDomain(tab?.url ? new URL(tab.url).hostname : '');
         }
       }
     };
@@ -80,7 +83,8 @@ export default function App() {
       const [tab] = await chrome.tabs.query({ active: true, windowId });
       if (!tab?.url) return;
 
-      setactiveTabInfo({ tabId: tab.id!, windowId, url: tab.url });
+      setTabId(tab.id!);
+      setCurrentDomain(new URL(tab.url).hostname);
     };
     chrome.windows.onFocusChanged.addListener(handleWindowFocus);
 
@@ -93,12 +97,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const domain = activeTabInfo?.url ? new URL(activeTabInfo.url).hostname : '';
-    if (currentDomain !== domain) {
-      setCurrentDomain(domain);
-    }
-    setContentScriptContext(activeTabInfo?.tabId ? `content-${activeTabInfo.tabId}` : 'undefined');
-  }, [activeTabInfo]);
+    setContentScriptContext(tabId ? `content-${tabId}` : 'undefined');
+  }, [tabId, currentDomain]);
 
   useEffect(() => {
     if (connectionManager && contentScriptContext !== 'undefined') {
@@ -109,7 +109,6 @@ export default function App() {
     }
   }, [isSelectionMode, contentScriptContext]);
 
-  /*
   useEffect(() => {
     if (!currentDomain) return;
 
@@ -124,7 +123,6 @@ export default function App() {
 
     loadDomainSettings();
   }, [currentDomain]);
-*/
 
   // Message handler
   const handleMessage = (message: BaseMessage) => {
@@ -134,6 +132,7 @@ export default function App() {
         const elementHiddenPayload = message.payload as MessagePayloads['ELEMENT_HIDDEN'];
         handleElementHidden(elementHiddenPayload.domain, elementHiddenPayload.identifier);
         break;
+      // Implement other message handling here ...
     }
   };
 

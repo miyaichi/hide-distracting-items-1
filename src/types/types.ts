@@ -16,3 +16,9 @@ export interface DomainSettings {
 export type Context = 'background' | 'sidepanel' | `content-${number}` | 'undefined';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
+
+declare global {
+  interface Window {
+    contentScriptInitialized?: boolean;
+  }
+}
