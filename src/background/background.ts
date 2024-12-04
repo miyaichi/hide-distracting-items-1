@@ -138,7 +138,7 @@ class BackgroundService {
     await chrome.storage.local.set({ activeTabInfo: this.activeTabInfo });
 
     if (!isAllowed) {
-      this.logger.debug('Script injection not allowed for this URL:', tab.url);
+      this.logger.info('Script injection not allowed for this URL:', tab.url);
       this.contentScriptContext = 'undefined';
       return;
     }
