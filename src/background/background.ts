@@ -1,4 +1,4 @@
-import { ExtensionMessage, MessageHandler, TabInfo } from '../types/messages';
+import { BaseMessage, ExtensionMessage, TabInfo } from '../types/messages';
 import { Context } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
 import { Logger } from '../utils/logger';
@@ -19,7 +19,7 @@ class BackgroundService {
 
   constructor() {
     this.logger = new Logger('background');
-    this.connectionManager = new ConnectionManager('background', this.handleMessage);
+    this.connectionManager = new ConnectionManager('background');
     this.setupConnection();
     this.setupChromeListeners();
     this.setupSidepanel();
@@ -89,8 +89,14 @@ class BackgroundService {
         port.onDisconnect.addListener(this.handleSidePanelDisconnection);
       }
 
-      // Forward messages between content script and side panel
       port.onMessage.addListener((message: ExtensionMessage) => {
+        if (message.target === 'background') {
+          // Handle messages targeted to background
+          this.handleMessage(port, message);
+          return;
+        }
+
+        // Forward messages between content script and side panel
         this.logger.debug('Forwarding message:', message);
         const targetPort = this.ports.get(message.target);
         targetPort?.postMessage(message);
@@ -163,9 +169,32 @@ class BackgroundService {
     }
   }
 
-  private handleMessage: MessageHandler = (message) => {
+  /**
+   * Helper function to send messages from background to other components.
+   * Uses direct port.postMessage for reliable message delivery.
+   */
+  private sendMessage<T extends BaseMessage>(
+    target: Context,
+    port: chrome.runtime.Port,
+    messageData: Omit<T, 'source' | 'target' | 'timestamp'>
+  ): void {
+    const message = {
+      ...messageData,
+      source: 'background',
+      target,
+      timestamp: Date.now(),
+    } as T;
+
+    port.postMessage(message);
+    this.logger.debug('Message sent', { target, type: message.type });
+  }
+
+  private handleMessage = (port: chrome.runtime.Port, message: ExtensionMessage) => {
     this.logger.debug('Message received', { type: message.type });
     // Implement message handling if needed
+    //
+    // When replying to a message, use this.sendMessage instead of ConnectionManager.sendMessage
+    // to keep the flow of messages consistent and avoid port disconnection issues.
   };
 }
 
