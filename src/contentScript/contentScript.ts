@@ -26,6 +26,10 @@ class ContentScript {
       // Listen for PING messages
       chrome.runtime.onMessage.addListener((message) => {
         if (message.type === 'PING') return true;
+        if (message.type === 'SIDEPANEL_CLOSED') {
+          this.performCleanup();
+          return true;
+        }
       });
 
       // Get activeTabInfo from storage
@@ -73,11 +77,6 @@ class ContentScript {
     this.logger.debug('Message received', { type: message.type });
 
     switch (message.type) {
-      case 'SIDEPANEL_CLOSED':
-        this.logger.debug('Sidepanel closed, performing cleanup');
-        this.performCleanup();
-        break;
-      // Implement other message handling here ...
       case 'INITIALIZE_CONTENT':
         this.initialization();
         break;
@@ -92,9 +91,13 @@ class ContentScript {
         const togglePayload = message.payload as MessagePayloads['TOGGLE_SELECTION_MODE'];
         this.toggleSelectionMode(togglePayload.enabled);
         break;
+      default:
+        this.logger.debug('Unknown message type:', message.type);
+        break;
     }
   };
 
+  // Cleanup on sidepanel close
   private performCleanup() {
     this.logger.debug('Starting cleanup');
     // Implement cleanup logic here ...
