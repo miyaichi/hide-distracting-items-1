@@ -10,7 +10,7 @@ export interface TabInfo {
 
 // Message payloads type
 export interface MessagePayloads {
-  ELEMENT_HIDDEN: { domain: string; identifier: ElementIdentifier };
+  ELEMENT_HIDDEN: { identifier: ElementIdentifier };
   INITIALIZE_CONTENT: undefined;
   RESTORE_HIDDEN_ELEMENTS: undefined;
   UNHIDE_ELEMENT: { identifier: ElementIdentifier };

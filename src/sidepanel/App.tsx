@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BaseMessage, MessagePayloads } from '../types/messages';
 import { Context, ElementIdentifier } from '../types/types';
 import { ConnectionManager } from '../utils/connectionManager';
@@ -111,17 +111,7 @@ export default function App() {
 
   useEffect(() => {
     if (!currentDomain) return;
-
-    const loadDomainSettings = async () => {
-      try {
-        const settings = await StorageManager.getDomainSettings(currentDomain);
-        setHiddenElements(settings.hiddenElements);
-      } catch (error) {
-        logger.error('Failed to load domain settings:', error);
-      }
-    };
-
-    loadDomainSettings();
+    loadHiddenElements();
   }, [currentDomain]);
 
   // Message handler
@@ -130,9 +120,36 @@ export default function App() {
     switch (message.type) {
       case 'ELEMENT_HIDDEN':
         const elementHiddenPayload = message.payload as MessagePayloads['ELEMENT_HIDDEN'];
-        handleElementHidden(elementHiddenPayload.domain, elementHiddenPayload.identifier);
+        handleElementHidden(elementHiddenPayload.identifier);
         break;
       // Implement other message handling here ...
+    }
+  };
+
+  const handleElementHidden = async (element: ElementIdentifier) => {
+    const newElements = [...hiddenElements, element];
+    await saveHiddenElements(newElements);
+  };
+
+  // Utility functions
+  const loadHiddenElements = async () => {
+    try {
+      const settings = await StorageManager.getDomainSettings(currentDomain);
+      setHiddenElements(settings.hiddenElements);
+    } catch (error) {
+      logger.error('Failed to load domain settings:', error);
+    }
+  };
+
+  const saveHiddenElements = async (elements: ElementIdentifier[]) => {
+    try {
+      setHiddenElements(elements);
+      await StorageManager.saveDomainSettings(currentDomain, {
+        hiddenElements: elements,
+        enabled: true,
+      });
+    } catch (error) {
+      logger.error('Error saving domain settings:', error);
     }
   };
 
@@ -141,65 +158,21 @@ export default function App() {
     setIsSelectionMode(enabled);
   };
 
-  const handleElementHidden = useCallback(async (domain: string, element: ElementIdentifier) => {
-    logger.log('Element selected for domain:', domain);
-    setHiddenElements((prevElements) => {
-      const newElements = [...prevElements, element];
-      logger.debug('Current hidden elements:', prevElements);
-      logger.debug('New hidden elements:', newElements);
-
-      // Storage update moved inside the callback to ensure we're using the latest state
-      StorageManager.saveDomainSettings(domain, {
-        hiddenElements: newElements,
-        enabled: true,
-      }).catch((error) => {
-        logger.error('Error saving domain settings:', error);
-      });
-
-      return newElements;
-    });
-  }, []);
-
   const handleRestoreHiddenElements = async () => {
-    logger.debug('Clearing all hidden elements');
-
-    setHiddenElements([]);
-
-    try {
-      await StorageManager.saveDomainSettings(currentDomain, {
-        hiddenElements: [],
-        enabled: true,
-      });
-
-      connectionManager?.sendMessage(contentScriptContext, {
-        type: 'RESTORE_HIDDEN_ELEMENTS',
-        payload: undefined,
-      });
-    } catch (error) {
-      logger.error('Failed to clear hidden elements:', error);
-    }
+    const newElements: ElementIdentifier[] = [];
+    await saveHiddenElements(newElements);
+    connectionManager?.sendMessage(contentScriptContext, {
+      type: 'RESTORE_HIDDEN_ELEMENTS',
+      payload: undefined,
+    });
   };
 
   const handleUnhideElement = async (identifier: ElementIdentifier) => {
-    if (!currentDomain) return;
-
-    logger.debug('Removing hidden element', identifier);
-    setHiddenElements((prevElements) => {
-      const newElements = prevElements.filter((element) => element.domPath !== identifier.domPath);
-
-      connectionManager?.sendMessage(contentScriptContext, {
-        type: 'UNHIDE_ELEMENT',
-        payload: { identifier: identifier },
-      });
-
-      StorageManager.saveDomainSettings(currentDomain, {
-        hiddenElements: newElements,
-        enabled: true,
-      }).catch((error) => {
-        logger.error('Error saving domain settings:', error);
-      });
-
-      return newElements;
+    const newElements = hiddenElements.filter((element) => element.domPath !== identifier.domPath);
+    await saveHiddenElements(newElements);
+    connectionManager?.sendMessage(contentScriptContext, {
+      type: 'UNHIDE_ELEMENT',
+      payload: { identifier: identifier },
     });
   };
 

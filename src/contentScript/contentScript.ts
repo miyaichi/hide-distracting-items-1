@@ -271,7 +271,7 @@ class ContentScript {
     this.logger.log('Element selected:', identifier);
     this.connectionManager?.sendMessage('sidepanel', {
       type: 'ELEMENT_HIDDEN',
-      payload: { domain: this.currentDomain, identifier },
+      payload: { identifier } as MessagePayloads['ELEMENT_HIDDEN'],
     });
 
     target.classList.add('hde-hidden');
