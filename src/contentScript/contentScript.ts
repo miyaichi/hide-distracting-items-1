@@ -39,11 +39,12 @@ class ContentScript {
 
       // Listen for storage changes
       chrome.storage.local.onChanged.addListener((changes) => {
-        const oldTabId = changes.activeTabInfo?.oldValue?.tabId;
-        const newTabId = changes.activeTabInfo?.newValue?.tabId;
-        const isAllowed = changes.activeTabInfo?.newValue?.isScriptInjectionAllowed;
+        const { oldValue, newValue } = changes.activeTabInfo || {};
+        const newTabId = newValue?.tabId;
+        const isAllowed = newValue?.isScriptInjectionAllowed;
 
-        if (newTabId && newTabId !== oldTabId && isAllowed) {
+        // Setup connection if allowed and connection doesn't exist or tabId has changed
+        if (newTabId && isAllowed && (!this.connectionManager || newTabId !== oldValue?.tabId)) {
           this.setupConnection(newTabId);
         }
       });
