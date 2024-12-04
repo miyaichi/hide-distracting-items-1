@@ -10,7 +10,7 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: '[name]/[name].js',
-    clean: true, // これを追加して、ビルド時に dist ディレクトリをクリーンアップ
+    clean: true,
   },
   module: {
     rules: [
