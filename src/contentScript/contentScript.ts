@@ -268,7 +268,7 @@ class ContentScript {
     const target = e.target as Element;
     const identifier = ElementFinder.getElementIdentifier(target);
 
-    this.logger.log('Element selected:', identifier);
+    this.logger.info('Element selected:', identifier);
     this.connectionManager?.sendMessage('sidepanel', {
       type: 'ELEMENT_HIDDEN',
       payload: { identifier } as MessagePayloads['ELEMENT_HIDDEN'],

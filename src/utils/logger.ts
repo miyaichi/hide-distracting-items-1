@@ -1,7 +1,7 @@
 interface LogLevel {
   error: number;
   warn: number;
-  log: number;
+  info: number;
   debug: number;
 }
 
@@ -10,7 +10,7 @@ export class Logger {
   private static readonly logLevels: LogLevel = {
     error: 1,
     warn: 2,
-    log: 3,
+    info: 3,
     debug: 4,
   };
 
@@ -38,8 +38,8 @@ export class Logger {
     }
   }
 
-  public log(message: string, ...args: any[]) {
-    if (this.shouldLog('log')) {
+  public info(message: string, ...args: any[]) {
+    if (this.shouldLog('info')) {
       console.log(`[${this.context}] ${message}`, ...args);
     }
   }
