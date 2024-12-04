@@ -14,7 +14,6 @@ export interface MessagePayloads {
   INITIALIZE_CONTENT: undefined;
   RESTORE_HIDDEN_ELEMENTS: undefined;
   UNHIDE_ELEMENT: { identifier: ElementIdentifier };
-  SIDEPANEL_CLOSED: undefined;
   TOGGLE_SELECTION_MODE: { enabled: boolean };
 }
 
