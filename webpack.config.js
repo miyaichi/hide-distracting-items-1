@@ -2,6 +2,8 @@ const path = require('path');
 const CopyPlugin = require('copy-webpack-plugin');
 
 module.exports = {
+  mode: 'development',
+  devtool: 'cheap-source-map',
   entry: {
     background: './src/background/background.ts',
     contentScript: './src/contentScript/contentScript.ts',
@@ -34,21 +36,15 @@ module.exports = {
   plugins: [
     new CopyPlugin({
       patterns: [
-        {
-          from: 'manifest.json',
-          to: 'manifest.json',
-        },
-        {
-          from: 'public/sidepanel.html',
-          to: 'sidepanel.html',
-        },
-        {
-          from: 'src/styles',
-          to: 'styles',
-        },
+        { from: 'manifest.json', to: 'manifest.json', },
+        { from: 'public/sidepanel.html', to: 'sidepanel.html', },
+        { from: 'src/styles', to: 'styles', },
       ],
     }),
   ],
-  devtool: 'cheap-source-map',
-  mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
+  optimization: {
+    splitChunks: {
+      chunks: 'all',
+    },
+  },
 };
